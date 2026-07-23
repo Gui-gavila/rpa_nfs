@@ -1,0 +1,15 @@
+# Runtime do agente (container T3 / Linux) — Tezk42/FSB.
+#
+# Sem framework web: o agente é um worker CLI.
+
+# Automação de browser (Protheus SmartClient Web)
+playwright>=1.48.0
+
+# Visão computacional (canvas do Protheus)
+opencv-python-headless>=4.9.0
+numpy>=1.26.0
+Pillow>=10.2.0
+
+# Configuração
+python-dotenv>=1.0.0
+typing-extensions>=4.8.0

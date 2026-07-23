@@ -1,0 +1,50 @@
+# Runtime mirror — só execução / deploy Carol (sem docs, IA, testes)
+
+# Secrets / config local
+.env
+.env.*
+!.env.example
+secrets.*
+secrets/
+*.key
+*.pem
+
+# Logs e artefactos
+*.log
+logs/
+temp/
+tmp/
+*.tmp
+screenshots/
+debug_*.png
+resultados/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Playwright / caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+playwright-report/
+.playwright/
+
+# Instaladores (não versionar). Documentação em files/.gitkeep.
+files/*
+!files/.gitkeep
+
+# OS / IDE local
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+
+# Compose override local
+docker-compose.override.yml

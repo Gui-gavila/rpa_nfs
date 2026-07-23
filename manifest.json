@@ -1,0 +1,52 @@
+{
+	"online": {
+		"processes": [{
+			"name": "Bot_Carol_Tezk42_Contabil",
+			"algorithmName": "botcaroltezk42contabil",
+			"algorithmDescription": {
+				"en-US": "Carol App RPA agent specialized for Tezk42 (FSB internal code). Connects via WireGuard VPN to the client environment and automates Protheus (SmartClient Web) by computer vision and keyboard.",
+				"pt-BR": "Agente RPA Carol App especializado para Tezk42 (código interno FSB). Conecta por VPN WireGuard ao ambiente do cliente e automatiza o Protheus (SmartClient Web) por visão computacional e teclado."
+			},
+			"algorithmTitle": {
+				"en-US": "Bot Carol Tezk42 Contabil",
+				"pt-BR": "Bot Carol Tezk42 Contábil"
+			},
+			"instanceProperties": {
+				"profile": "",
+				"properties": {
+					"dockerName": "botcaroltezk42contabil",
+					"instanceType": "c1.small",
+					"autoscale": {
+						"enabled": false,
+						"minReplicas": 1,
+						"maxReplicas": 1
+					},
+					"preemptible": false
+				},
+				"environments": {
+					"ERP_TYPE": "protheus",
+					"RUNTIME_MODE": "t3",
+					"VPN_MODE": "container",
+					"VPN_TYPE": "WIREGUARD",
+					"WIREGUARD_CONFIG": "REPLACE_ME_ON_DEPLOY",
+					"WIREGUARD_INTERFACE": "wg0",
+					"VPN_PROBE_TARGET": "REPLACE_ME_ON_DEPLOY",
+					"PROTHEUS_URL": "REPLACE_ME_ON_DEPLOY",
+					"PROTHEUS_USERNAME": "REPLACE_ME_ON_DEPLOY",
+					"PROTHEUS_PASSWORD": "REPLACE_ME_ON_DEPLOY",
+					"PROTHEUS_PROGRAMA_INICIAL": "REPLACE_ME_ON_DEPLOY",
+					"PROTHEUS_AMBIENTE_SERVIDOR": "REPLACE_ME_ON_DEPLOY",
+					"LOG_LEVEL": "INFO"
+				}
+			}
+		}]
+	},
+	"docker": [{
+		"dockerName": "botcaroltezk42contabil",
+		"dockerTag": "0.1.0",
+		"gitBranch": "master",
+		"gitPath": "/",
+		"instanceType": "c1.small",
+		"gitDockerfileName": "Dockerfile"
+	}]
+}

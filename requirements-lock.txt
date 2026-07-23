@@ -1,0 +1,21 @@
+# ─── Exact Version Lock (Pinned Dependencies) ───────────────────────────────
+# Generated for reproducible builds
+# Usage: pip install -r requirements-lock.txt
+# Update with: pip-compile --generate-hashes requirements.txt
+
+# Core Production Dependencies
+playwright==1.48.2
+python-dotenv==1.0.1
+opencv-python-headless==4.9.0.80
+Pillow==10.2.0
+typing-extensions==4.12.2
+
+# Development Dependencies (if needed)
+# black==24.10.0
+# ruff==0.3.7
+# mypy==1.8.0
+# pytest==7.4.4
+# pytest-cov==4.1.0
+# ipython==8.20.0
+# ipdb==0.13.13
+# pre-commit==3.6.0

@@ -1,0 +1,47 @@
+# Pasta de instaladores de terceiros (não versionados)
+
+Coloque aqui os artefatos antes do `docker compose build`. O Dockerfile instala
+de forma condicional; o Git ignora tudo exceto este ficheiro.
+
+## TOTVS Smart Client Web Agent (Protheus) — obrigatório em T3
+
+Origem: Central de Downloads TOTVS (conta com acesso à linha Protheus / P12).
+Documentação: https://tdn.totvs.com/display/tec/2.+WebApp+-+WebAgent
+
+Ficheiro (nome na Central; o padrão do Dockerfile é `*WEB-AGENT*.TAR.GZ`):
+
+| Versão | Nome na Central de Downloads | SHA-256 |
+| --- | --- | --- |
+| 1.1.1 (preferida) | `26-07-02-P12_SMARTCLIENT_WEB-AGENT_1.1.1_LINUX_X64.TAR.GZ` | `34BDD977D19FC389513B045979C115CB9A924E567CCECB235E6B4F54DC4DB370` |
+| 1.1.0 | `26-05-19-P12_SMARTCLIENT_WEB-AGENT_1.1.0_LINUX_X64.TAR.GZ` | `850415E26EC8102C47F10421A6BB7095CBF3E6F26F5D2AD2B927B31F0A4B0BEE` |
+
+Passos:
+
+1. Descarregar o TAR.GZ Linux x64 e copiar para esta pasta (`files/`).
+2. Confirmar o hash: `Get-FileHash -Algorithm SHA256 .\files\*.TAR.GZ`
+3. `docker compose build agent` — o build deve logar `web-agent instalado`.
+4. No `.env` de produção / Carol: deixar `WEB_AGENT_FORWARD_HOST` e
+   `WEB_AGENT_FORWARD_PORT` vazios (o binário fica em `/opt/web-agent/web-agent`).
+
+Não usar o MSI Windows (`web-agent-*-windows-*.msi`) — o container é Linux.
+
+## Certificados WSS e limitação do binário Linux 1.1.0
+
+O SmartClient fala `wss://127.0.0.1:21021`. O `.deb` Linux 1.1.0 **não** traz
+os ficheiros de certificado; copie da instalação Windows
+(`%LocalAppData%\Programs\web-agent\`):
+
+- `totvs_certificate_CA.crt`
+- `totvs_certificate.crt`
+- `totvs_certificate_key.pem`
+- `cacert.pem` (opcional)
+
+O Dockerfile instala-os em `/opt/web-agent/` e o agente pode subir um shim TLS.
+**Porém** os binários Linux **1.1.0 e 1.1.1** (validados 2026-07-22) não ativam
+WSS nativo; atrás do shim o WA rejeita o *secure handshake* e encerra. Em lab
+Docker Desktop use `WEB_AGENT_FORWARD_HOST=host.docker.internal` com o Web Agent
+Windows (WSS nativo). Em Carol App: bloquear até TOTVS disponibilizar pacote
+Linux com TLS/WSS nativo, ou operação só com forward no host.
+
+Lab sem o TAR.GZ: só o forward para o Windows. Em Carol App não dependa do
+forward quando o binário Linux WSS estiver corrigido.

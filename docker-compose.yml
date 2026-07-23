@@ -1,0 +1,28 @@
+services:
+  agent:
+    build: .
+    # Obrigatórios para o processo levantar a VPN de dentro do container
+    # (VPN_MODE=container): criar a interface WireGuard exige NET_ADMIN e
+    # /dev/net/tun (wg-quick).
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    env_file: .env
+    environment:
+      - AGENT_ENV=production
+      - RUNTIME_MODE=t3
+    volumes:
+      # Log diário, screenshots de falha e artefatos ficam fora do container:
+      # é a evidência de uma corrida agendada, e some se o container for removido.
+      - ./logs:/app/logs
+      - ./screenshots:/app/screenshots
+    # Argumentos chegam ao worker. Sem argumentos, roda o fluxo do ERP ativo.
+    # Diagnóstico sem tocar o ERP:  docker compose run --rm agent --dry-run --json
+    command: []
+    networks:
+      - vpn-network
+
+networks:
+  vpn-network:
+    driver: bridge
