@@ -50,6 +50,18 @@ SEL_ENTRAR = 'button.po-button:has-text("Entrar")'
 # Tela legada Programa Inicial / Ambiente
 SEL_OK = 'button:has-text("OK")'
 
+# Menu SIGACOM (sidebar HTML do Protheus Web)
+MENU_CAMINHO_PRODUTOS = ("Atualizações", "Cadastros", "Produtos")
+# Templates opcionais em resources/protheus/ (fallback se DOM falhar)
+MENU_TEMPLATES = {
+    "Atualizações": "menu-atualizacoes.png",
+    "Cadastros": "menu-cadastros.png",
+    "Produtos": "menu-produtos.png",
+}
+TMPL_DIALOG_OK = "dialog-ok.png"
+MENU_CLICK_TIMEOUT_S = 20.0
+DIALOG_OK_TIMEOUT_S = 25.0
+
 
 class ProtheusAgent(ErpAgent):
     """Autentica no Protheus Web e entra na tela principal do ERP."""
@@ -229,6 +241,94 @@ class ProtheusAgent(ErpAgent):
         self.surface.sleep(0.5)
         self.surface.press("enter")
 
+    def _seletores_item_menu(self, rotulo: str) -> list[str]:
+        """Seletores DOM para um item do menu lateral (rótulo pode vir com contagem)."""
+        return [
+            f'a:has-text("{rotulo}")',
+            f'span:has-text("{rotulo}")',
+            f'div:has-text("{rotulo}")',
+            f'text={rotulo}',
+        ]
+
+    def _clicar_item_menu(self, rotulo: str) -> bool:
+        """Clica num item do menu: DOM primeiro, template de visão como fallback."""
+        for seletor in self._seletores_item_menu(rotulo):
+            n = self._contar_dom(seletor)
+            if n is not None and n > 0:
+                try:
+                    self.surface.click_dom(seletor)
+                    logger.info("[ProtheusAgent] menu DOM '%s' via %s", rotulo, seletor)
+                    return True
+                except Exception as e:
+                    logger.debug("[ProtheusAgent] click_dom %s falhou: %s", seletor, e)
+
+        template = MENU_TEMPLATES.get(rotulo)
+        click_image = getattr(self.surface, "click_image", None)
+        if template and callable(click_image):
+            if click_image(
+                template,
+                confidence=0.72,
+                timeout_s=MENU_CLICK_TIMEOUT_S,
+            ):
+                logger.info("[ProtheusAgent] menu imagem '%s' (%s)", rotulo, template)
+                return True
+
+        logger.error("[ProtheusAgent] item de menu não encontrado: %s", rotulo)
+        return False
+
+    def _confirmar_dialogo_ok(self) -> bool:
+        """Confirma o diálogo que abre ao lançar a rotina (botão OK)."""
+        # PO / HTML
+        for seletor in (SEL_OK, 'button:has-text("Ok")', 'text=OK'):
+            n = self._contar_dom(seletor)
+            if n is not None and n > 0:
+                try:
+                    self.surface.click_dom(seletor)
+                    logger.info("[ProtheusAgent] diálogo OK via DOM (%s)", seletor)
+                    return True
+                except Exception as e:
+                    logger.debug("[ProtheusAgent] click OK DOM falhou: %s", e)
+
+        click_image = getattr(self.surface, "click_image", None)
+        if callable(click_image) and click_image(
+            TMPL_DIALOG_OK,
+            confidence=0.72,
+            timeout_s=DIALOG_OK_TIMEOUT_S,
+        ):
+            logger.info("[ProtheusAgent] diálogo OK via imagem")
+            return True
+
+        # Último recurso: Enter costuma confirmar o diálogo padrão do Protheus.
+        try:
+            self.surface.press("enter")
+            logger.info("[ProtheusAgent] diálogo OK via Enter")
+            return True
+        except Exception as e:
+            logger.error("[ProtheusAgent] não foi possível confirmar OK: %s", e)
+            return False
+
+    def _abrir_cadastro_produtos(self) -> bool:
+        """Menu: Atualizações → Cadastros → Produtos → OK."""
+        logger.info(
+            "[ProtheusAgent] navegando menu: %s",
+            " → ".join(MENU_CAMINHO_PRODUTOS),
+        )
+        for rotulo in MENU_CAMINHO_PRODUTOS:
+            if not self._clicar_item_menu(rotulo):
+                self.screenshot(f"protheus_menu_falha_{rotulo.lower()}")
+                return False
+            self.surface.sleep(SETTLE_S)
+            self.screenshot(f"protheus_menu_{rotulo.lower()}")
+
+        self.surface.sleep(SETTLE_S)
+        if not self._confirmar_dialogo_ok():
+            self.screenshot("protheus_produtos_ok_falha")
+            return False
+        self.surface.sleep(SETTLE_S)
+        self.screenshot("protheus_produtos")
+        logger.info("[ProtheusAgent] cadastro de Produtos aberto")
+        return True
+
     # --- contrato ErpAgent --------------------------------------------------
 
     def login(self) -> bool:
@@ -279,10 +379,10 @@ class ProtheusAgent(ErpAgent):
         return False
 
     def run(self, **kwargs: Any) -> dict[str, Any]:
-        """Confirma a sessão e entra na tela principal do ERP.
+        """Entra no ERP e abre Cadastros → Produtos (SIGACOM).
 
-        Este é o ponto de extensão: um fork substitui o corpo daqui para baixo
-        pela rotina de negócio, mantendo o contrato de resultado.
+        Fluxo: session-settings → tela principal →
+        Atualizações → Cadastros → Produtos → OK.
         """
         resultado: dict[str, Any] = {
             "ok": False,
@@ -321,6 +421,13 @@ class ProtheusAgent(ErpAgent):
 
             self.screenshot("protheus_erp_principal")
             logger.info("[ProtheusAgent] entrada no ERP concluída")
+
+            if not self._abrir_cadastro_produtos():
+                resultado["erro"] = "protheus_menu_produtos_falhou"
+                logger.error("[ProtheusAgent] %s", resultado["erro"])
+                resultado["screenshots"] = self._screenshots
+                return resultado
+
             resultado["ok"] = True
         except Exception as e:
             logger.error("[ProtheusAgent] falha ao entrar no ERP: %s", e, exc_info=True)
