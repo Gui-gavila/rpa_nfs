@@ -1,4 +1,4 @@
-# Runtime mirror — só execução / deploy Carol (sem docs, IA, testes)
+# Runtime mirror - so execucao / deploy Carol (sem docs, IA, testes)
 
 # Secrets / config local
 .env
@@ -35,7 +35,7 @@ build/
 playwright-report/
 .playwright/
 
-# Instaladores (não versionar). Documentação em files/.gitkeep.
+# Instaladores (nao versionar). Documentacao em files/.gitkeep.
 files/*
 !files/.gitkeep
 

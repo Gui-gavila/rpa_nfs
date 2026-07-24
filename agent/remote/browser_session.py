@@ -6,9 +6,16 @@ ficar utilizável, encerrar no fim.
 
 Playwright **síncrono**, alinhado às demais camadas.
 
-O viewport é fixo e isso é requisito, não preferência: o SmartClient Web
-desenha em canvas, a automação usa coordenadas calibradas, e um viewport
-variável as invalida.
+Resolução invariante (headed = headless)
+----------------------------------------
+O SmartClient Web desenha em canvas; clique por imagem e coordenadas
+calibradas exigem o mesmo frame em qualquer modo. Por isso:
+
+- viewport lógico fixo (`BROWSER_WIDTH`×`BROWSER_HEIGHT`);
+- `device_scale_factor=1` (ignora DPI do Windows / monitor);
+- após maximizar a janela OS (só headed), o viewport é reafirmado.
+
+Maximizar a janela não muda o tamanho do frame capturado.
 """
 
 from __future__ import annotations
@@ -19,6 +26,10 @@ from typing import Any
 from agent.remote.base import RemoteSession
 
 logger = logging.getLogger(__name__)
+
+# Escala física do frame. 1.0 = 1 pixel de screenshot por CSS px.
+# Sem isto, headed no Windows (125%/150%) diverge do headless e quebra CV.
+DEVICE_SCALE_FACTOR = 1.0
 
 
 class BrowserSession(RemoteSession):
@@ -59,6 +70,90 @@ class BrowserSession(RemoteSession):
 
     # --- ciclo de vida ------------------------------------------------------
 
+    def _args_chromium(self) -> list[str]:
+        """Flags comuns headed/headless — resolução estável para visão."""
+        args = [
+            # Força DPR=1 mesmo com scaling do SO (lab Windows).
+            f"--force-device-scale-factor={DEVICE_SCALE_FACTOR:g}",
+            "--ignore-certificate-errors",
+            "--allow-insecure-localhost",
+        ]
+        if self.headless:
+            # Obrigatórios em container: sem /dev/shm generoso e sem user namespaces.
+            args += ["--no-sandbox", "--disable-dev-shm-usage"]
+        else:
+            # Janela OS maximizada; o viewport Playwright continua fixo abaixo.
+            args += ["--start-maximized"]
+        return args
+
+    def _opcoes_contexto(self) -> dict[str, Any]:
+        """Contexto idêntico em headed e headless (viewport + escala)."""
+        return {
+            "viewport": {"width": self.width, "height": self.height},
+            "device_scale_factor": DEVICE_SCALE_FACTOR,
+            "ignore_https_errors": True,
+            "locale": self.locale,
+        }
+
+    def _maximizar_janela(self) -> None:
+        """Maximiza a janela do Chromium (headed). Não altera o viewport lógico."""
+        if self.headless or self.page is None or self._context is None:
+            return
+        try:
+            cdp = self._context.new_cdp_session(self.page)
+            janela = cdp.send("Browser.getWindowForTarget")
+            cdp.send(
+                "Browser.setWindowBounds",
+                {
+                    "windowId": janela["windowId"],
+                    "bounds": {"windowState": "maximized"},
+                },
+            )
+            logger.info(
+                "[BrowserSession] janela maximizada (viewport lógico %sx%s)",
+                self.width, self.height,
+            )
+        except Exception as e:
+            logger.warning("[BrowserSession] não foi possível maximizar a janela: %s", e)
+
+    def _garantir_resolucao(self) -> None:
+        """Reafirma viewport após launch/maximize e valida DPR efetivo.
+
+        Garante que headed e headless produzam o mesmo frame para clique por imagem.
+        """
+        if self.page is None:
+            return
+        try:
+            self.page.set_viewport_size({"width": self.width, "height": self.height})
+        except Exception as e:
+            logger.warning("[BrowserSession] set_viewport_size falhou: %s", e)
+            return
+
+        vp = getattr(self.page, "viewport_size", None) or {}
+        vw = int(vp.get("width") or 0)
+        vh = int(vp.get("height") or 0)
+        try:
+            dpr = float(self.page.evaluate("window.devicePixelRatio") or 0.0)
+        except Exception as e:
+            logger.warning("[BrowserSession] devicePixelRatio indisponível: %s", e)
+            dpr = 0.0
+
+        logger.info(
+            "[BrowserSession] resolução efetiva viewport=%sx%s dpr=%s (alvo %sx%s dpr=%s)",
+            vw, vh, dpr, self.width, self.height, DEVICE_SCALE_FACTOR,
+        )
+        if vw and vh and (vw != self.width or vh != self.height):
+            logger.error(
+                "[BrowserSession] viewport divergente do configurado — "
+                "clique por imagem pode falhar"
+            )
+        if dpr and abs(dpr - DEVICE_SCALE_FACTOR) > 0.01:
+            logger.error(
+                "[BrowserSession] devicePixelRatio=%s (esperado %s) — "
+                "headed/headless vão divergir no matching",
+                dpr, DEVICE_SCALE_FACTOR,
+            )
+
     def connect(self) -> bool:
         if self.is_ready():
             logger.info("[BrowserSession] sessão já ativa")
@@ -88,28 +183,21 @@ class BrowserSession(RemoteSession):
             )
             return False
 
-        args: list[str] = []
-        if self.headless:
-            # Obrigatórios em container: sem /dev/shm generoso e sem user namespaces.
-            args += ["--no-sandbox", "--disable-dev-shm-usage"]
-        # Web Agent / shim TLS usa certificado TOTVS (WSS em 127.0.0.1).
-        args += ["--ignore-certificate-errors", "--allow-insecure-localhost"]
-
+        args = self._args_chromium()
         logger.info(
-            "[BrowserSession] abrindo Chromium headless=%s viewport=%sx%s",
-            self.headless, self.width, self.height,
+            "[BrowserSession] abrindo Chromium headless=%s viewport=%sx%s scale=%s",
+            self.headless, self.width, self.height, DEVICE_SCALE_FACTOR,
         )
         try:
             self._playwright = sync_playwright().start()
             self._browser = self._playwright.chromium.launch(
                 headless=self.headless, args=args, slow_mo=self.slow_mo_ms
             )
-            self._context = self._browser.new_context(
-                viewport={"width": self.width, "height": self.height},
-                ignore_https_errors=True,
-                locale=self.locale,
-            )
+            self._context = self._browser.new_context(**self._opcoes_contexto())
             self.page = self._context.new_page()
+            self._maximizar_janela()
+            # Maximize pode interferir no layout da janela; trava de novo o viewport.
+            self._garantir_resolucao()
             logger.info("[BrowserSession] navegando para %s", self.url)
             self.page.goto(self.url, timeout=self.load_timeout_s * 1000)
             self.page.wait_for_load_state("load")
