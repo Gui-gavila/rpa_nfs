@@ -1,3 +1,199 @@
+# >>> GANDYR-GITIGNORE-BASELINE:BEGIN
+# Baseline comum Gandyr (DA-029).
+# Fontes: VisualStudio.gitignore (GitHub/Microsoft) + Node + Python + OS + secrets.
+# Merge idempotente: preserve regras especificas do projeto FORA deste bloco.
+# NAO ignore: AGENTS.md, AI-CONTEXT.md, .docs/, .cursor/, .claude/, .githooks/,
+#             CHANGELOG.md, BACKLOG.md, Architecture.md (modo LEGADO).
+# Encoding: ASCII-safe sem acento e sem BOM (ADR-000 D2).
+
+############################################################
+# SECRETS E CONFIG LOCAL (nunca versionar; use *.example)
+############################################################
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.pfx
+*.p12
+secrets/
+**/secrets.local.*
+**/appsettings.*.local.json
+**/appsettings.Local.json
+credentials*.json
+token*.json
+**/local.settings.json
+
+############################################################
+# BUILD / PUBLISH / TEST (Microsoft Visual Studio + generico)
+############################################################
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Ll]og/
+[Ll]ogs/
+artifacts/
+publish/
+PublishProfiles/*.pubxml.user
+*.pubxml.user
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+*.nuget.props
+*.nuget.targets
+project.lock.json
+project.fragment.lock.json
+TestResults/
+[Tt]est[Rr]esult*/
+*.trx
+*.coverage
+*.coveragexml
+*.dotCover
+*.tmp
+*.temp
+*_i.c
+*_p.c
+*_h.h
+*.ilk
+*.meta
+*.obj
+*.iobj
+*.pch
+*.pdb
+*.ipdb
+*.pgc
+*.pgd
+*.rsp
+*.sbr
+*.tlb
+*.tli
+*.tlh
+*.tmp_proj
+*.log
+*.tlog
+*.vspscc
+*.vssscc
+.builds
+*.pidb
+*.svclog
+*.scc
+
+############################################################
+# IDE / EDITOR LOCAL
+############################################################
+.vs/
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.VC.db
+*.VC.VC.opendb
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+############################################################
+# NODE
+############################################################
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm
+.yarn/
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+.pnp.*
+dist/
+.turbo/
+.next/
+.nuxt/
+.cache/
+.parcel-cache/
+
+############################################################
+# PYTHON
+############################################################
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.venv/
+venv/
+ENV/
+env/
+# Nota: nao ignorar lib/ generico (conflita com pastas Lib/.NET).
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.ipynb_checkpoints/
+
+############################################################
+# OS
+############################################################
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+############################################################
+# OFFICE LOCKS / BACKUP LOCAL VOLUMOSO
+############################################################
+# Locks temporarios do Microsoft Office (nao versionar).
+~$*
+# Backups locais volumosos de campanha/scripts (nao versionar).
+.docs/**/backup/f4f5/
+**/backup/f4f5/
+
+############################################################
+# GANDYR / SECONDBRAIN (modo CANONICO)
+############################################################
+# Junction para memoria canonica no vault. Conteudo versionado no Git do vault.
+/.gandyr/
+# <<< GANDYR-GITIGNORE-BASELINE:END
+
 # Runtime mirror - so execucao / deploy Carol (sem docs, IA, testes)
 
 # Secrets / config local
