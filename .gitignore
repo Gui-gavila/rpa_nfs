@@ -35,7 +35,7 @@ build/
 playwright-report/
 .playwright/
 
-# Instaladores (nao versionar). Documentacao em files/.gitkeep.
+# Instaladores (nao versionar).
 files/*
 !files/.gitkeep
 
