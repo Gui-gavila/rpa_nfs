@@ -194,11 +194,50 @@ class PlaywrightSurface(VisionMixin, Surface):
 
     def fill_dom(self, selector: str, valor: str, *, indice: int = 0) -> None:
         """Preenche um input real do DOM (página ou iframe do SmartClient)."""
-        self._locator_dom(selector, indice=indice).fill(valor)
+        self._locator_dom(selector, indice=indice, timeout_s=5.0).fill(
+            valor, timeout=5_000
+        )
 
-    def click_dom(self, selector: str, *, indice: int = 0) -> None:
+    def fill_dom_por_rotulo(self, rotulo: str, valor: str, *, timeout_ms: int = 4000) -> bool:
+        """Preenche o campo PO/HTML cujo rótulo visível é `rotulo` (ex.: Filial)."""
+        frames = list(getattr(self.page, "frames", None) or [])
+        if self.page is not None and self.page not in frames:
+            frames = [self.page, *frames]
+        for alvo in frames:
+            candidatos = []
+            try:
+                candidatos.append(alvo.get_by_label(rotulo, exact=False))
+            except Exception:
+                pass
+            try:
+                candidatos.append(
+                    alvo.locator("po-field, .po-field, po-combo, .po-combo")
+                    .filter(has_text=rotulo)
+                    .locator("input")
+                )
+            except Exception:
+                pass
+            for loc in candidatos:
+                try:
+                    if loc.count() <= 0:
+                        continue
+                    campo = loc.first
+                    campo.click(timeout=timeout_ms)
+                    campo.fill(valor, timeout=timeout_ms)
+                    campo.press("Tab")
+                    logger.info(
+                        "[PlaywrightSurface] fill_dom_por_rotulo rotulo=%s", rotulo
+                    )
+                    return True
+                except Exception:
+                    continue
+        return False
+
+    def click_dom(
+        self, selector: str, *, indice: int = 0, force: bool = False
+    ) -> None:
         """Clica num elemento real do DOM (página ou iframe do SmartClient)."""
-        self._locator_dom(selector, indice=indice).click()
+        self._locator_dom(selector, indice=indice).click(force=force)
 
     @property
     def rota(self) -> str:

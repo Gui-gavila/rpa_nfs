@@ -17,7 +17,10 @@ falhe no preflight e não no meio da UI.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 ESTAGIOS = (
     "preflight",
@@ -35,14 +38,18 @@ ESTAGIOS = (
 #   programa identificador do programa/rotina no ERP (livre; "" quando não aplica)
 AGENTES: dict[str, dict[str, str]] = {
     # Protheus — smoke de conectividade: autentica e chega à tela principal.
-    # Especialização Tezk42 (FSB): estender `run()` com a rotina de negócio.
     "login": {"erp": "protheus", "programa": ""},
+    # Classificação NFS TES 002 — data-plane + UI MATA103 (UI completa em F4).
+    "classificar_nf": {"erp": "protheus", "programa": "MATA103"},
 }
 
 _ALIASES: dict[str, str] = {
     "login": "login",
     "smoke": "login",
     "protheus": "login",
+    "classificar_nf": "classificar_nf",
+    "classificacao_nf": "classificar_nf",
+    "tes002": "classificar_nf",
 }
 
 
@@ -81,10 +88,13 @@ def registrar_passo(
     ok: bool,
     detalhe: str = "",
 ) -> None:
-    """Acrescenta um estágio executado ao resultado."""
+    """Acrescenta um estágio executado ao resultado e grava no log operacional."""
     result.setdefault("passos", []).append(
         {"passo": nome, "ok": ok, "detalhe": detalhe}
     )
+    marca = "OK" if ok else "FALHA"
+    extra = f" {detalhe}" if detalhe else ""
+    logger.info("[pipeline] passo=%s %s%s", nome, marca, extra)
 
 
 # Chaves que, quando devolvidas por um agente, também são publicadas em
@@ -93,6 +103,7 @@ _CHAVES_ARTEFATO = (
     "nomeArquivo",
     "caminhoArquivo",
     "caminho_relatorio",
+    "caminho_checkpoint",
     "screenshots",
     "anexos_email",
     "params",

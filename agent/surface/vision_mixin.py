@@ -26,10 +26,14 @@ class VisionMixin:
     resources_dir: str | Path = "resources"
 
     def _resolver_template(self, image_path: str | Path) -> tuple[Path, str]:
-        """Separa (diretório, nome) aceitando caminho completo ou nome simples."""
+        """Separa (diretório, nome) aceitando caminho completo ou nome sob resources_dir."""
         p = Path(image_path)
-        if p.parent != Path("."):
+        if p.is_absolute() or p.is_file():
             return p.parent, p.name
+        sob_resources = Path(self.resources_dir) / p
+        if p.parent != Path(".") or sob_resources.is_file():
+            # `mata103/btn.png` → resources_dir/mata103 + btn.png
+            return sob_resources.parent, sob_resources.name
         return Path(self.resources_dir), p.name
 
     def locate_center(
@@ -84,13 +88,17 @@ class VisionMixin:
         import time
 
         pasta, nome = self._resolver_template(image_path)
-        if not (pasta / nome).is_file():
-            logger.error("[Surface] template ausente: %s", pasta / nome)
+        caminho = pasta / nome
+        if not caminho.is_file():
+            logger.error("[Surface] template ausente: %s", caminho)
             return False
 
         deadline = time.time() + timeout_s
         while time.time() < deadline:
-            pos = self.locate_center(pasta / nome, confidence=confidence, scales=scales)
+            # Passar path absoluto evita re-prefixar resources_dir em locate_center.
+            pos = self.locate_center(
+                caminho.resolve(), confidence=confidence, scales=scales
+            )
             if pos:
                 x, y = pos[0] + offset_x, pos[1] + offset_y
                 self.click(x, y, clicks=clicks, button=button)
@@ -99,6 +107,14 @@ class VisionMixin:
             time.sleep(0.5)
 
         logger.warning("[Surface] template não encontrado em %ss: %s", timeout_s, nome)
+        try:
+            from agent.ops_alert import gravar_screenshot_ui
+
+            gravar_screenshot_ui(
+                surface=self, contexto=f"template_{Path(nome).stem}"
+            )
+        except Exception:
+            pass
         return False
 
     def wait_image(

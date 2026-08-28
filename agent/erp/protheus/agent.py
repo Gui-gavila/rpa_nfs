@@ -50,19 +50,6 @@ SEL_ENTRAR = 'button.po-button:has-text("Entrar")'
 # Tela legada Programa Inicial / Ambiente
 SEL_OK = 'button:has-text("OK")'
 
-# Menu SIGACOM (sidebar HTML do Protheus Web)
-MENU_CAMINHO_PRODUTOS = ("Atualizações", "Cadastros", "Produtos")
-# Templates opcionais em resources/protheus/ (fallback se DOM falhar)
-MENU_TEMPLATES = {
-    "Atualizações": "menu-atualizacoes.png",
-    "Cadastros": "menu-cadastros.png",
-    "Produtos": "menu-produtos.png",
-}
-TMPL_DIALOG_OK = "dialog-ok.png"
-MENU_CLICK_TIMEOUT_S = 20.0
-DIALOG_OK_TIMEOUT_S = 25.0
-
-
 class ProtheusAgent(ErpAgent):
     """Autentica no Protheus Web e entra na tela principal do ERP."""
 
@@ -94,15 +81,17 @@ class ProtheusAgent(ErpAgent):
 
     def screenshot(self, nome: str) -> str | None:
         """Grava evidência da tela atual. Nunca interrompe o fluxo."""
-        try:
-            self.screenshots_dir.mkdir(parents=True, exist_ok=True)
-            caminho = self.screenshots_dir / f"{nome}.png"
-            self.surface.screenshot_para(str(caminho))
+        from agent.ops_alert import gravar_screenshot_ui
+
+        caminho = gravar_screenshot_ui(
+            surface=self.surface,
+            contexto=nome,
+            pasta=self.screenshots_dir,
+        )
+        if caminho:
             self._screenshots.append(str(caminho))
             return str(caminho)
-        except Exception as e:
-            logger.warning("[ProtheusAgent] screenshot '%s' falhou: %s", nome, e)
-            return None
+        return None
 
     def _aguardar_rota(self, trecho: str) -> bool:
         """Aguarda a rota interna do SmartClient. False se a Surface não a expõe."""
@@ -241,94 +230,6 @@ class ProtheusAgent(ErpAgent):
         self.surface.sleep(0.5)
         self.surface.press("enter")
 
-    def _seletores_item_menu(self, rotulo: str) -> list[str]:
-        """Seletores DOM para um item do menu lateral (rótulo pode vir com contagem)."""
-        return [
-            f'a:has-text("{rotulo}")',
-            f'span:has-text("{rotulo}")',
-            f'div:has-text("{rotulo}")',
-            f'text={rotulo}',
-        ]
-
-    def _clicar_item_menu(self, rotulo: str) -> bool:
-        """Clica num item do menu: DOM primeiro, template de visão como fallback."""
-        for seletor in self._seletores_item_menu(rotulo):
-            n = self._contar_dom(seletor)
-            if n is not None and n > 0:
-                try:
-                    self.surface.click_dom(seletor)
-                    logger.info("[ProtheusAgent] menu DOM '%s' via %s", rotulo, seletor)
-                    return True
-                except Exception as e:
-                    logger.debug("[ProtheusAgent] click_dom %s falhou: %s", seletor, e)
-
-        template = MENU_TEMPLATES.get(rotulo)
-        click_image = getattr(self.surface, "click_image", None)
-        if template and callable(click_image):
-            if click_image(
-                template,
-                confidence=0.72,
-                timeout_s=MENU_CLICK_TIMEOUT_S,
-            ):
-                logger.info("[ProtheusAgent] menu imagem '%s' (%s)", rotulo, template)
-                return True
-
-        logger.error("[ProtheusAgent] item de menu não encontrado: %s", rotulo)
-        return False
-
-    def _confirmar_dialogo_ok(self) -> bool:
-        """Confirma o diálogo que abre ao lançar a rotina (botão OK)."""
-        # PO / HTML
-        for seletor in (SEL_OK, 'button:has-text("Ok")', 'text=OK'):
-            n = self._contar_dom(seletor)
-            if n is not None and n > 0:
-                try:
-                    self.surface.click_dom(seletor)
-                    logger.info("[ProtheusAgent] diálogo OK via DOM (%s)", seletor)
-                    return True
-                except Exception as e:
-                    logger.debug("[ProtheusAgent] click OK DOM falhou: %s", e)
-
-        click_image = getattr(self.surface, "click_image", None)
-        if callable(click_image) and click_image(
-            TMPL_DIALOG_OK,
-            confidence=0.72,
-            timeout_s=DIALOG_OK_TIMEOUT_S,
-        ):
-            logger.info("[ProtheusAgent] diálogo OK via imagem")
-            return True
-
-        # Último recurso: Enter costuma confirmar o diálogo padrão do Protheus.
-        try:
-            self.surface.press("enter")
-            logger.info("[ProtheusAgent] diálogo OK via Enter")
-            return True
-        except Exception as e:
-            logger.error("[ProtheusAgent] não foi possível confirmar OK: %s", e)
-            return False
-
-    def _abrir_cadastro_produtos(self) -> bool:
-        """Menu: Atualizações → Cadastros → Produtos → OK."""
-        logger.info(
-            "[ProtheusAgent] navegando menu: %s",
-            " → ".join(MENU_CAMINHO_PRODUTOS),
-        )
-        for rotulo in MENU_CAMINHO_PRODUTOS:
-            if not self._clicar_item_menu(rotulo):
-                self.screenshot(f"protheus_menu_falha_{rotulo.lower()}")
-                return False
-            self.surface.sleep(SETTLE_S)
-            self.screenshot(f"protheus_menu_{rotulo.lower()}")
-
-        self.surface.sleep(SETTLE_S)
-        if not self._confirmar_dialogo_ok():
-            self.screenshot("protheus_produtos_ok_falha")
-            return False
-        self.surface.sleep(SETTLE_S)
-        self.screenshot("protheus_produtos")
-        logger.info("[ProtheusAgent] cadastro de Produtos aberto")
-        return True
-
     # --- contrato ErpAgent --------------------------------------------------
 
     def login(self) -> bool:
@@ -378,12 +279,387 @@ class ProtheusAgent(ErpAgent):
         logger.error("[ProtheusAgent] login não avançou (credenciais ou fluxo inesperado)")
         return False
 
-    def run(self, **kwargs: Any) -> dict[str, Any]:
-        """Entra no ERP e abre Cadastros → Produtos (SIGACOM).
+    def _preencher_filial_session_settings(self, filial_codigo: str) -> bool:
+        """Preenche Filial na tela HTML /session-settings (antes de Entrar)."""
+        fil = (filial_codigo or "").strip()
+        if not fil:
+            return False
+        por_rotulo = getattr(self.surface, "fill_dom_por_rotulo", None)
+        if por_rotulo:
+            try:
+                if por_rotulo("Filial", fil):
+                    logger.info(
+                        "[ProtheusAgent] session-settings filial=%s via rotulo",
+                        fil,
+                    )
+                    self.surface.sleep(0.4)
+                    return True
+            except Exception:
+                pass
+        fill = getattr(self.surface, "fill_dom", None)
+        if fill is None:
+            logger.warning(
+                "[ProtheusAgent] session-settings filial=%s não preenchida (DOM)",
+                fil,
+            )
+            return False
+        # Só seletores amarrados ao rótulo Filial — po-input genérico dá timeout.
+        candidatos: list[tuple[str, int]] = [
+            ('po-field:has-text("Filial") input', 0),
+            ('po-combo:has-text("Filial") input', 0),
+            ('.po-field:has-text("Filial") input', 0),
+            ('label:has-text("Filial") ~ * input', 0),
+        ]
+        for sel, indice in candidatos:
+            try:
+                if (self._contar_dom(sel) or 0) <= indice:
+                    continue
+                fill(sel, fil, indice=indice)
+                logger.info(
+                    "[ProtheusAgent] session-settings filial=%s via %s[%s]",
+                    fil,
+                    sel,
+                    indice,
+                )
+                self.surface.sleep(0.4)
+                return True
+            except Exception:
+                continue
+        logger.warning(
+            "[ProtheusAgent] session-settings filial=%s não preenchida (DOM)",
+            fil,
+        )
+        return False
 
-        Fluxo: session-settings → tela principal →
-        Atualizações → Cadastros → Produtos → OK.
+    def _entrar_erp_principal(
+        self, *, filial_codigo: str = ""
+    ) -> tuple[bool, str | None]:
+        """Session-settings → tela principal. (ok, erro_slug)."""
+        logger.info("[ProtheusAgent] confirmando sessão")
+        if filial_codigo:
+            self._preencher_filial_session_settings(filial_codigo)
+        if (self._contar_dom(SEL_ENTRAR) or 0) > 0:
+            self.surface.click_dom(SEL_ENTRAR)
+        else:
+            self.surface.click(*self.btn_entrar)
+
+        if not self._aguardar_saida_session_settings():
+            self.screenshot("protheus_erp_falha")
+            return False, "protheus_entrada_falhou: session-settings não avançou"
+
+        # Espera home real (menu lateral). Session-settings pode ficar em «Carregando…».
+        import time
+
+        deadline = time.time() + max(ERP_LOAD_S, 15.0)
+        ja_na_home = False
+        while time.time() < deadline:
+            ja_na_home = (self._contar_dom("text=Trocar módulo") or 0) > 0 or (
+                self._contar_dom("text=Atualizações") or 0
+            ) > 0
+            if ja_na_home:
+                break
+            self.surface.sleep(0.5)
+        if not ja_na_home:
+            self.surface.sleep(ERP_LOAD_S)
+            self.surface.click(*self.btn_fechar_aviso)
+            self.surface.sleep(SETTLE_S * 2)
+            ja_na_home = (self._contar_dom("text=Trocar módulo") or 0) > 0 or (
+                self._contar_dom("text=Atualizações") or 0
+            ) > 0
+        else:
+            self.surface.sleep(SETTLE_S)
+
+        if not ja_na_home:
+            self.screenshot("protheus_erp_falha")
+            return False, "protheus_entrada_falhou: home do ERP não apareceu"
+
+        self.screenshot("protheus_erp_principal")
+        logger.info("[ProtheusAgent] entrada no ERP concluída")
+        return True, None
+
+    def _trocar_filial_erp(self, filial_codigo: str) -> tuple[bool, str | None]:
+        """Log Off → session-settings com a nova filial → home."""
+        fil = (filial_codigo or "").strip()
+        logger.info("[ProtheusAgent] trocar_filial=%s", fil)
+        if not fil:
+            return False, "protheus_troca_filial_falhou: filial vazia"
+        click_dom = getattr(self.surface, "click_dom", None)
+        sleep = getattr(self.surface, "sleep", None)
+        if click_dom is None:
+            return self._entrar_erp_principal(filial_codigo=fil)
+        if (self._contar_dom("text=Log Off") or 0) <= 0:
+            return False, "protheus_troca_filial_falhou: Log Off ausente"
+        try:
+            click_dom("text=Log Off")
+        except Exception as e:
+            return False, f"protheus_troca_filial_falhou: {type(e).__name__}"
+        if sleep:
+            sleep(SETTLE_S)
+        for sel in (
+            "button:has-text('Sim')",
+            "po-button:has-text('Sim')",
+            "button:has-text('Confirmar')",
+        ):
+            if (self._contar_dom(sel) or 0) > 0:
+                try:
+                    click_dom(sel)
+                except Exception:
+                    pass
+                if sleep:
+                    sleep(SETTLE_S)
+                break
+        import time
+
+        deadline = time.time() + max(self.nav_timeout_s / 2.0, 15.0)
+        while time.time() < deadline:
+            rota = getattr(self.surface, "rota", "") or ""
+            if "/session-settings" in rota or (self._contar_dom(SEL_ENTRAR) or 0) > 0:
+                return self._entrar_erp_principal(filial_codigo=fil)
+            if "/login" in rota or (self._contar_dom(SEL_LOGIN) or 0) > 0:
+                if not self.login():
+                    return False, "protheus_troca_filial_falhou: login"
+                return self._entrar_erp_principal(filial_codigo=fil)
+            if sleep:
+                sleep(0.4)
+            else:
+                time.sleep(0.4)
+        self.screenshot("protheus_troca_filial_falha")
+        return False, "protheus_troca_filial_falhou: session-settings não voltou"
+
+    def _run_classificar_nf(self, **kwargs: Any) -> dict[str, Any]:
+        """Entra no ERP e classifica a fila_ui via MATA103; atualiza checkpoint."""
+        from agent import config
+        from agent.domain.classificacao_nf.status import StatusNf
+        from agent.erp.protheus.mata103 import Mata103Ui
+        from agent.integrations.protheus_api import criar_protheus_api_client
+        from agent.jobs.classificar_nf.checkpoint import Checkpoint, ItemCheckpoint
+        from agent.jobs.classificar_nf.lote import agrupar_por_filial
+
+        resultado: dict[str, Any] = {
+            "ok": False,
+            "erro": None,
+            "modulo": "MATA103",
+            "screenshots": self._screenshots,
+            "ui_pendente": False,
+            "classificadas": 0,
+            "falhas_ui": 0,
+        }
+        try:
+            fila_raw = kwargs.get("fila_ui") or []
+            itens: list[ItemCheckpoint] = []
+            for raw in fila_raw:
+                if isinstance(raw, ItemCheckpoint):
+                    itens.append(raw)
+                elif isinstance(raw, dict):
+                    itens.append(ItemCheckpoint.from_dict(raw))
+
+            grupos = agrupar_por_filial(
+                [i for i in itens if i.status == StatusNf.PRONTO_UI]
+            )
+            filial_sessao = ""
+            if grupos:
+                filial_sessao = grupos[0][0].filial_codigo
+            elif itens:
+                filial_sessao = itens[0].filial_codigo
+            ok, erro = self._entrar_erp_principal(filial_codigo=filial_sessao)
+            if not ok:
+                resultado["erro"] = erro
+                resultado["screenshots"] = self._screenshots
+                return resultado
+
+            ck_path = kwargs.get("checkpoint_path") or config.CLASSIFICAR_NF_CHECKPOINT_PATH
+            ck = Checkpoint.carregar(ck_path) if ck_path else None
+
+            ui = Mata103Ui(
+                self.surface,
+                resources_dir=config.PROTHEUS_RESOURCES_DIR,
+                modo=config.MATA103_MODO,
+                settle_s=float(config.MATA103_SETTLE_S),
+            )
+            api = criar_protheus_api_client()
+
+            classificadas = 0
+            falhas = 0
+            for gi, grupo in enumerate(grupos):
+                filial_grupo = (grupo[0].filial_codigo or "").strip()
+                if gi > 0:
+                    ui.preparar_troca_filial(filial_grupo)
+                    ok_t, err_t = self._trocar_filial_erp(filial_grupo)
+                    if not ok_t:
+                        logger.error("[ProtheusAgent] %s", err_t)
+                        # Não fechar no data-plane: leftover PRONTO_UI retenta no próximo worker.
+                        falhas += len(grupo)
+                        continue
+                for item in grupo:
+                    logger.info(
+                        "[ProtheusAgent] MATA103 item %s status=%s",
+                        item.chave,
+                        item.status,
+                    )
+                    res = ui.classificar_item(item)
+                    if res.ok:
+                        # Commit do F1_STATUS pode atrasar alguns segundos após o Salvar UI.
+                        confirmada = False
+                        status_api = "-"
+                        consultar = getattr(api, "consultar_f1_status", None)
+                        for tentativa in range(5):
+                            confirmada = api.confirmar_classificada(
+                                filial_codigo=item.filial_codigo,
+                                numero_nf=item.numero_nf,
+                                codigo_fornecedor=item.codigo_fornecedor,
+                            )
+                            if consultar:
+                                try:
+                                    lido = consultar(
+                                        filial_codigo=item.filial_codigo,
+                                        numero_nf=item.numero_nf,
+                                        codigo_fornecedor=item.codigo_fornecedor,
+                                    )
+                                    status_api = (
+                                        "-" if lido is None else (lido or "(vazio)")
+                                    )
+                                except Exception:
+                                    status_api = "?"
+                            logger.info(
+                                "[ProtheusAgent] confirmacao_api:chave=%s|"
+                                "F1_STATUS=%s|ok=%s|tentativa=%s",
+                                item.chave,
+                                status_api,
+                                confirmada,
+                                tentativa + 1,
+                            )
+                            if confirmada or ui.simulado:
+                                break
+                            logger.info(
+                                "[ProtheusAgent] confirmação API pendente %s tentativa=%s",
+                                item.chave,
+                                tentativa + 1,
+                            )
+                            sleep = getattr(self.surface, "sleep", None)
+                            if sleep:
+                                sleep(1.2)
+                            else:
+                                import time
+
+                                time.sleep(1.2)
+                        if confirmada or ui.simulado:
+                            item.status = StatusNf.CLASSIFICADO
+                            item.motivo = None
+                            classificadas += 1
+                            try:
+                                from agent.jobs.classificar_nf.caminhos import (
+                                    mover_para_classificadas_protheus,
+                                )
+
+                                novo = mover_para_classificadas_protheus(
+                                    item.pdf_path
+                                )
+                                if novo is not None:
+                                    item.pdf_path = str(novo)
+                                    logger.info(
+                                        "[ProtheusAgent] movido_03:chave=%s|pdf=%s",
+                                        item.chave,
+                                        novo,
+                                    )
+                            except Exception as e:
+                                logger.warning(
+                                    "[ProtheusAgent] move 02→03 falhou chave=%s: %s",
+                                    item.chave,
+                                    e,
+                                )
+                            try:
+                                from agent.jobs.classificar_nf.caminhos import (
+                                    caminhos_de_config,
+                                )
+                                from agent.reporting.controle_vivo import (
+                                    FLAG_SIM,
+                                    carregar_indice,
+                                    salvar_indice,
+                                    upsert_indice,
+                                )
+                                from agent.reporting.enriquecer_controle import (
+                                    agora_iso_local,
+                                )
+
+                                controle = (
+                                    config.CLASSIFICAR_NF_CONTROLE_XLSX or ""
+                                ).strip() or caminhos_de_config().get(
+                                    "controle_xlsx", ""
+                                )
+                                if controle:
+                                    indice = carregar_indice(controle)
+                                    upsert_indice(
+                                        indice,
+                                        {
+                                            "COD_FILIAL": item.filial_codigo,
+                                            "NUMERO_NF": item.numero_nf,
+                                            "COD_FORNECEDOR": item.codigo_fornecedor,
+                                            "STATUS": StatusNf.CLASSIFICADO,
+                                            "MOTIVO": "",
+                                            "STATUS_CLASSIFICACAO_PROTHEUS": (
+                                                status_api
+                                                if status_api
+                                                not in ("-", "?", "(vazio)", "")
+                                                else FLAG_SIM
+                                            ),
+                                            "TIMESTAMP SAIDA": agora_iso_local(),
+                                        },
+                                        forcar=(
+                                            "STATUS",
+                                            "MOTIVO",
+                                            "STATUS_CLASSIFICACAO_PROTHEUS",
+                                            "TIMESTAMP SAIDA",
+                                        ),
+                                    )
+                                    salvar_indice(controle, indice)
+                            except Exception as e:
+                                logger.warning(
+                                    "[ProtheusAgent] planilha Protheus falhou chave=%s: %s",
+                                    item.chave,
+                                    e,
+                                )
+                        else:
+                            item.status = StatusNf.NAO_CLASSIFICADO
+                            item.motivo = (
+                                "Interno - Status Classificada não confirmado na API"
+                            )
+                            falhas += 1
+                    else:
+                        item.status = res.status
+                        item.motivo = res.motivo
+                        falhas += 1
+                    if ck is not None:
+                        ck.upsert(item)
+                        ck.salvar()
+
+            resultado["ok"] = True
+            resultado["classificadas"] = classificadas
+            resultado["falhas_ui"] = falhas
+            resultado["n_fila_ui"] = len(itens)
+            if not itens:
+                resultado["aviso"] = "fila_ui_vazia"
+            logger.info(
+                "[ProtheusAgent] MATA103 fim classificadas=%s falhas=%s",
+                classificadas,
+                falhas,
+            )
+        except Exception as e:
+            logger.error("[ProtheusAgent] classificar_nf falhou: %s", e, exc_info=True)
+            self.screenshot("protheus_erp_falha")
+            resultado["erro"] = f"protheus_mata103_falhou: {e}"
+        resultado["screenshots"] = self._screenshots
+        return resultado
+
+    def run(self, **kwargs: Any) -> dict[str, Any]:
+        """Rotina de negócio conforme `fluxo`.
+
+        - default / login: smoke até a tela principal do ERP (sem menu Cadastros)
+        - classificar_nf: entrada ERP + fila UI (MATA103)
         """
+        fluxo = (kwargs.get("fluxo") or kwargs.get("agente") or "").strip().lower()
+        if fluxo in ("classificar_nf", "classificacao_nf", "tes002"):
+            return self._run_classificar_nf(**kwargs)
+
         resultado: dict[str, Any] = {
             "ok": False,
             "erro": None,
@@ -391,43 +667,14 @@ class ProtheusAgent(ErpAgent):
             "screenshots": self._screenshots,
         }
         try:
-            logger.info("[ProtheusAgent] confirmando sessão")
-            # session-settings é PO UI (HTML no iframe). Preferir DOM; coordenada
-            # só como fallback para ambientes antigos em canvas.
-            if (self._contar_dom(SEL_ENTRAR) or 0) > 0:
-                self.surface.click_dom(SEL_ENTRAR)
-            else:
-                self.surface.click(*self.btn_entrar)
-
-            if not self._aguardar_saida_session_settings():
-                self.screenshot("protheus_erp_falha")
-                resultado["erro"] = "protheus_entrada_falhou: session-settings não avançou"
-                logger.error("[ProtheusAgent] %s", resultado["erro"])
+            ok, erro = self._entrar_erp_principal()
+            if not ok:
+                resultado["erro"] = erro
+                logger.error("[ProtheusAgent] %s", erro)
                 resultado["screenshots"] = self._screenshots
                 return resultado
 
-            # Se a home já está visível, não precisa esperar a carga completa.
-            ja_na_home = (self._contar_dom("text=Trocar módulo") or 0) > 0 or (
-                self._contar_dom("text=Log Off") or 0
-            ) > 0
-            if not ja_na_home:
-                self.surface.sleep(ERP_LOAD_S)
-                # Ambientes de homologação exibem um modal de aviso. O clique é
-                # inócuo quando ele não existe (cai em área vazia do cabeçalho).
-                self.surface.click(*self.btn_fechar_aviso)
-                self.surface.sleep(SETTLE_S * 2)
-            else:
-                self.surface.sleep(SETTLE_S)
-
-            self.screenshot("protheus_erp_principal")
-            logger.info("[ProtheusAgent] entrada no ERP concluída")
-
-            if not self._abrir_cadastro_produtos():
-                resultado["erro"] = "protheus_menu_produtos_falhou"
-                logger.error("[ProtheusAgent] %s", resultado["erro"])
-                resultado["screenshots"] = self._screenshots
-                return resultado
-
+            logger.info("[ProtheusAgent] smoke login: tela principal OK")
             resultado["ok"] = True
         except Exception as e:
             logger.error("[ProtheusAgent] falha ao entrar no ERP: %s", e, exc_info=True)

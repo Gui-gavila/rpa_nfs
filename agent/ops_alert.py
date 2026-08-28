@@ -22,12 +22,10 @@ logger = logging.getLogger(__name__)
 
 
 def resolve_alert_dir(log_dir: Path | None = None) -> Path:
-    """Pasta onde gravar artefatos de falha (mesma dos logs por padrão)."""
-    if log_dir is not None:
-        return Path(log_dir)
-    from agent.logging_setup import resolve_log_dir
+    """Pasta dos PNG de falha UI (05_Screenshots/ANOMES). `log_dir` é legado e ignorado."""
+    from agent.jobs.classificar_nf.caminhos import pasta_screenshot_falha
 
-    return resolve_log_dir()
+    return pasta_screenshot_falha()
 
 
 def _gravar_frame(frame: Any, path: Path) -> bool:
@@ -48,34 +46,59 @@ def _gravar_frame(frame: Any, path: Path) -> bool:
         return False
 
 
+def gravar_screenshot_ui(
+    *,
+    surface: Any = None,
+    contexto: str = "erro",
+    pasta: str | Path | None = None,
+    when: datetime | None = None,
+) -> Path | None:
+    """Grava PNG da UI em 05_Screenshots/ANOMES. Nunca propaga exceção.
+
+    O nome do ficheiro (stamp + contexto) entra no log para cruzar com a falha.
+    """
+    from agent.jobs.classificar_nf.caminhos import (
+        montar_nome_screenshot,
+        pasta_screenshot_falha,
+    )
+
+    out_dir = pasta_screenshot_falha(pasta)
+    path = out_dir / montar_nome_screenshot(contexto, when=when)
+    if surface is None:
+        logger.warning("[screenshot] falhou: sem Surface contexto=%s", contexto)
+        return None
+    try:
+        shot = getattr(surface, "screenshot_para", None)
+        if callable(shot):
+            shot(str(path))
+        else:
+            frame = surface.capture()
+            if frame is None or not _gravar_frame(frame, path):
+                logger.warning(
+                    "[screenshot] Surface não devolveu frame contexto=%s", contexto
+                )
+                return None
+        logger.info(
+            "[screenshot] arquivo=%s pasta=%s contexto=%s",
+            path.name,
+            out_dir,
+            contexto,
+        )
+        return path
+    except Exception as e:
+        logger.warning("[screenshot] captura falhou contexto=%s: %s", contexto, e)
+        return None
+
+
 def capture_error_screenshot(
     *,
     surface: Any = None,
     log_dir: Path | None = None,
     prefix: str = "erro",
 ) -> Path | None:
-    """Grava PNG do estado da tela no momento da falha. None se não der.
-
-    Usa a Surface ativa — é ela que enxerga o que o agente enxergava.
-    """
-    out_dir = resolve_alert_dir(log_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    path = out_dir / f"{prefix}-{stamp}.png"
-
-    if surface is None:
-        logger.warning("[ops_alert] screenshot falhou: sem Surface")
-        return None
-
-    try:
-        frame = surface.capture()
-        if frame is not None and _gravar_frame(frame, path):
-            logger.info("[ops_alert] screenshot=%s (via Surface)", path)
-            return path
-        logger.warning("[ops_alert] Surface não devolveu frame")
-    except Exception as e:
-        logger.warning("[ops_alert] captura pela Surface falhou: %s", e)
-    return None
+    """PNG do estado da tela no momento da falha. Destino = 05_Screenshots (não o log)."""
+    del log_dir  # legado: PNG não acompanha mais o ficheiro de log
+    return gravar_screenshot_ui(surface=surface, contexto=prefix)
 
 
 def _smtp_configured() -> bool:

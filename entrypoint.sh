@@ -6,7 +6,7 @@
 #
 # Argumentos do `docker run` chegam ao worker:
 #   docker run <imagem> --dry-run --json
-#   docker run <imagem> --ate login
+#   docker run <imagem> --fluxo classificar_nf --inicio-ate-planilha
 
 set -euo pipefail
 

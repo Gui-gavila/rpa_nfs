@@ -18,15 +18,19 @@ logger = logging.getLogger(__name__)
 
 def _agente_protheus(surface: Any, **kwargs: Any) -> ErpAgent:
     from agent.erp.protheus.agent import ProtheusAgent
+    from agent.jobs.classificar_nf.caminhos import pasta_screenshot_falha
 
     perfil = config.resolve_protheus_perfil()
+    dest = (config.SCREENSHOTS_DIR or "").strip() or str(
+        pasta_screenshot_falha(criar=True)
+    )
     return ProtheusAgent(
         surface,
         username=perfil["username"],
         password=perfil["password"],
         programa=perfil["programa"],
         ambiente=perfil["ambiente"],
-        screenshots_dir=config.SCREENSHOTS_DIR,
+        screenshots_dir=dest,
         nav_timeout_s=config.PROTHEUS_UI_LOAD_TIMEOUT_S,
         **kwargs,
     )
