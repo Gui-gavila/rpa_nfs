@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Iterable, Mapping
 
+from agent.domain.classificacao_nf.feriados_br import ajustar_para_dia_util_anterior
+
 
 def _norm(valor: Any) -> str:
     return str(valor or "").strip()
@@ -64,9 +66,12 @@ def calcular_vencimento(
     referencia: date,
     tabela_especial: Iterable[Mapping[str, Any]] | None = None,
 ) -> date:
-    """Prioriza vencimento especial do fornecedor; senão regra por nível."""
+    """Prioriza vencimento especial do fornecedor; senão RN-08 + dia útil.
+
+    De-para especial não é ajustado (data explícita da Fiscal).
+    """
     if tabela_especial is not None:
         especial = vencimento_especial_fornecedor(codigo_fornecedor, tabela_especial)
         if especial is not None:
             return especial
-    return vencimento_por_nivel(nivel, referencia)
+    return ajustar_para_dia_util_anterior(vencimento_por_nivel(nivel, referencia))

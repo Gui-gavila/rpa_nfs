@@ -24,7 +24,15 @@ COD_RETENCAO_IR = "1708"
 COD_RETENCAO_PCC = "5952"
 
 SETTLE_S = 1.2
+AGUARDAR_TELA_S = 10.0  # teto para rotina/filtro/formulário aparecerem
 ROTINA = "MATA103"
+
+# `campo-filtro-numero.png` ancora o TÍTULO do F12 («através de perguntas»),
+# não o rótulo Número. Offsets até Número e Fornecedor (lab 1280×720).
+# Após o Fornecedor o SX1 foca Filial sozinho — sem Tab/clique extra.
+_FILTRO_DX_INPUT = 140
+_FILTRO_DY_NUMERO = 43
+_FILTRO_DY_FORNECEDOR = 65
 
 
 @dataclass
@@ -101,6 +109,15 @@ class Mata103Ui:
         self._press("tab")
         self._log(f"type_filial_dialog_tab:{fil}")
 
+    def _preencher_filial_filtro_foco_erp(self, filial_codigo: str) -> None:
+        """Grava Filial no F12 sem Tab/clique: o ERP já avançou o foco após o Fornecedor."""
+        fil = (filial_codigo or "").strip()
+        if not fil:
+            return
+        self._sleep()
+        self._type_campo(fil)
+        self._log(f"type_filtro_filial_foco_erp:{fil}")
+
     def _evidencia(self, nome: str) -> None:
         if self.simulado:
             return
@@ -117,7 +134,7 @@ class Mata103Ui:
         self,
         nome: str,
         *,
-        timeout_s: float = 12.0,
+        timeout_s: float = AGUARDAR_TELA_S,
         offset_x: int = 0,
         offset_y: int = 0,
         confidence: float = 0.72,
@@ -171,7 +188,7 @@ class Mata103Ui:
                 # Espera home do ERP (menu lateral) antes de navegar.
                 import time
 
-                deadline = time.time() + 20.0
+                deadline = time.time() + AGUARDAR_TELA_S
                 while time.time() < deadline and int(contar("text=Atualizações") or 0) <= 0:
                     _aguardar(0.5)
                 if int(contar("text=Atualizações") or 0) > 0:
@@ -206,7 +223,7 @@ class Mata103Ui:
                     self._log("click_dom_pesquisar:fallback")
                 except Exception:
                     pass
-            elif not self._click_template("campo-pesquisar.png", timeout_s=8.0):
+            elif not self._click_template("campo-pesquisar.png", timeout_s=AGUARDAR_TELA_S):
                 if locate:
                     try:
                         centro = locate("mata103/campo-pesquisar.png", confidence=0.72)
@@ -272,7 +289,7 @@ class Mata103Ui:
                 if not confirmou:
                     break
                 # Canvas SmartClient demora a pintar após o diálogo.
-                _aguardar(max(self.settle_s * 5.0, 8.0))
+                _aguardar(AGUARDAR_TELA_S)
                 # Sessão AdvPL: título do diálogo (não o botão Visualizar da home).
                 ainda = int(
                     contar('[title*="TOTVS Linha Protheus" i]') or 0
@@ -284,7 +301,7 @@ class Mata103Ui:
         # Só clica no título da rotina se o match for no topo (evita falso positivo).
         pos_titulo = self._locate("mata103/tela-documento-entrada.png", confidence=0.9)
         if pos_titulo and pos_titulo[1] < 80:
-            self._click_template("tela-documento-entrada.png", timeout_s=4.0)
+            self._click_template("tela-documento-entrada.png", timeout_s=AGUARDAR_TELA_S)
         else:
             self._log("skip_tela_documento_entrada:match_invalido")
         # Lab FSB: após abrir pode surgir Parametros; o filtro F12 auto-aberto
@@ -489,7 +506,7 @@ class Mata103Ui:
         self._log("click_filtro_confirmar:enter")
         return False
 
-    def _aguardar_filtro_perguntas(self, *, timeout_s: float = 8.0) -> bool:
+    def _aguardar_filtro_perguntas(self, *, timeout_s: float = AGUARDAR_TELA_S) -> bool:
         if self.simulado or self.surface is None:
             return True
         sleep = getattr(self.surface, "sleep", None)
@@ -614,6 +631,41 @@ class Mata103Ui:
         self._log("natureza:info_fechada")
         return True
 
+    def _focar_vencimento(self) -> None:
+        """Refoca o campo vencimento após o modal Natureza.
+
+        Sem clique/Tab o ERP mantém o default (último dia do mês). Template
+        opcional ``campo-vencimento.png`` (offset +35, igual à Natureza);
+        fallback = Natureza já calibrada + Tab.
+        """
+        if self.simulado or self.surface is None:
+            self._log("duplicatas:venc_foco")
+            return
+        click = getattr(self.surface, "click", None)
+        pos_venc = self._locate("mata103/campo-vencimento.png", confidence=0.85)
+        if pos_venc and click:
+            x, y = pos_venc[0] + 35, pos_venc[1]
+            click(x, y, clicks=2)
+            self._log(f"click_vencimento_dbl:@({x},{y})")
+            self._log("duplicatas:venc_foco")
+            self._sleep()
+            return
+        pos_nat = self._locate("mata103/campo-natureza.png", confidence=0.85)
+        if pos_nat and click:
+            x, y = pos_nat[0] + 35, pos_nat[1]
+            click(x, y, clicks=2)
+            self._press("tab")
+            self._log("duplicatas:venc_foco_via_natureza_tab")
+            self._sleep()
+            return
+        if click:
+            click(115, 635, clicks=2)
+            self._press("tab")
+            self._log("duplicatas:venc_foco_via_natureza_coords_tab")
+            self._sleep()
+            return
+        self._log("duplicatas:venc_foco_teclado")
+
     def _motivo_help_bloqueio(self) -> str | None:
         """Detecta help de negócio (ex.: calendário contábil bloqueado)."""
         if self.simulado or self.surface is None:
@@ -645,8 +697,8 @@ class Mata103Ui:
     ) -> bool:
         """Aplica filtros via F12 «Filtro através de perguntas».
 
-        Ordem dos campos no lab FSB (2026-08-13): Número → Fornecedor → Filial
-        → Confirmar.
+        Número e Fornecedor por clique. Depois do Fornecedor o SX1 foca
+        Filial sozinho — Tab/clique extra tira o foco e deixa residual SX1.
         """
         self._log(
             f"pesquisar:filial={filial_codigo}|nf={numero_nf}|forn={codigo_fornecedor}"
@@ -666,11 +718,11 @@ class Mata103Ui:
                 if self._tem_dialogo_parametros():
                     # F12 abriu Parametros — confirma e tenta de novo só 1x.
                     self._confirmar_parametros()
-                    if self._aguardar_filtro_perguntas(timeout_s=2.0):
+                    if self._aguardar_filtro_perguntas():
                         break
                     self._log(f"pesquisar:f12_viu_parametros:{tentativa + 1}")
                     continue
-                if self._aguardar_filtro_perguntas(timeout_s=6.0):
+                if self._aguardar_filtro_perguntas():
                     break
                 self._log(f"pesquisar:filtro_retry:{tentativa + 1}")
             else:
@@ -685,36 +737,27 @@ class Mata103Ui:
             doc = dig.zfill(9)[-9:]
         forn = (codigo_fornecedor or "").strip()
         fil = (filial_codigo or "").strip()
-        # Número/Fornecedor por clique; Filial por Tab a partir do Fornecedor.
-        # Lab 2026-08-21: dy=85 do rótulo NÃO acerta Filial — o campo ficava
-        # com residual «1401» e o browse voltava vazio (NF está em 0401).
         pos_num = self._locate("mata103/campo-filtro-numero.png", confidence=0.88)
         click = getattr(self.surface, "click", None) if self.surface else None
         if pos_num and click and pos_num[1] >= 200:
-            # Lab 1280x720: rótulo Numero ~y=267; inputs Numero/Forn em +43/+65.
-            x0, y0 = pos_num[0] + 140, pos_num[1]
-            click(x0, y0 + 43)
-            self._log(f"click_filtro_numero:@({x0},{y0 + 43})")
+            x0, y0 = pos_num[0] + _FILTRO_DX_INPUT, pos_num[1]
+            click(x0, y0 + _FILTRO_DY_NUMERO)
+            self._log(f"click_filtro_numero:@({x0},{y0 + _FILTRO_DY_NUMERO})")
             self._sleep()
             self._type_campo(doc)
-            click(x0, y0 + 65)
-            self._log(f"click_filtro_fornecedor:@({x0},{y0 + 65})")
+            click(x0, y0 + _FILTRO_DY_FORNECEDOR)
+            self._log(f"click_filtro_fornecedor:@({x0},{y0 + _FILTRO_DY_FORNECEDOR})")
             self._sleep()
             self._type_campo(forn)
-            # Tab leva ao input Filial (evita offset Y curto que errava o campo).
-            self._press("tab")
-            self._sleep()
-            self._type_campo(fil)
-            self._log(f"type_filtro_filial_via_tab:{fil}")
+            self._preencher_filial_filtro_foco_erp(fil)
             self._evidencia("mata103_filtro_preenchido")
         else:
             if not self._focar_campo_filtro_numero():
                 self._log("pesquisar:sem_foco_numero")
             self._type_campo(doc)
-            self._press("tab")
+            self._press("down")
             self._type_campo(forn)
-            self._press("tab")
-            self._type_campo(fil)
+            self._preencher_filial_filtro_foco_erp(fil)
             self._evidencia("mata103_filtro_preenchido")
         self._confirmar_filtro_perguntas()
         sleep = getattr(self.surface, "sleep", None) if self.surface else None
@@ -810,10 +853,18 @@ class Mata103Ui:
         sleep = getattr(self.surface, "sleep", None) if self.surface else None
 
         def _aguardar_form() -> bool:
-            if sleep:
-                sleep(max(self.settle_s * 3.0, 3.5))
-            self._confirmar_parametros()
-            self._dismiss_help_dialogs()
+            if self.simulado or self.surface is None:
+                return True
+            import time
+
+            deadline = time.time() + AGUARDAR_TELA_S
+            while time.time() < deadline:
+                self._confirmar_parametros()
+                self._dismiss_help_dialogs()
+                if self._formulario_classificacao_aberto():
+                    return True
+                if sleep:
+                    sleep(0.4)
             return self._formulario_classificacao_aberto()
 
         # 1) Foca Classificar e confirma com Space/Enter (clique só foca o botão PO).
@@ -840,7 +891,7 @@ class Mata103Ui:
                     self._log(f"click_dom_classificar_falhou:{type(e).__name__}")
                     continue
         # 2) Template + Space
-        if self._click_template("btn-classificar.png", timeout_s=6.0):
+        if self._click_template("btn-classificar.png", timeout_s=AGUARDAR_TELA_S):
             self._press("space")
             if _aguardar_form():
                 return True
@@ -891,6 +942,8 @@ class Mata103Ui:
         # Natureza com retenção abre «Informações da Natureza» — fechar antes do vencimento.
         if not self._fechar_info_natureza():
             return False
+        # Modal rouba o foco; sem refoco o Protheus mantém o default (fim do mês).
+        self._focar_vencimento()
         # Vencimento: digitar data do data-plane (PDF FSB — validar/ajustar na UI).
         venc_ui = self._data_ui(data_vencimento)
         if venc_ui:

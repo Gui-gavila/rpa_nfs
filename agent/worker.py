@@ -203,6 +203,7 @@ def _estagio_fila_checkpoint(result: dict[str, Any], *, agente: str) -> bool:
         from agent.jobs.classificar_nf.checkpoint import Checkpoint
         from agent.reporting.controle_vivo import (
             carregar_indice,
+            completar_data_vencimento,
             item_de_linha_controle,
         )
 
@@ -212,6 +213,17 @@ def _estagio_fila_checkpoint(result: dict[str, Any], *, agente: str) -> bool:
         )
         indice = carregar_indice(controle) if controle else {}
         ck = Checkpoint.carregar(ck_path) if ck_path.is_file() else None
+        tabela_esp: list = []
+        try:
+            from agent.domain.classificacao_nf.xlsx_loader import (
+                carregar_tabelas_depara_de_config,
+            )
+
+            tabela_esp = list(
+                carregar_tabelas_depara_de_config().vencimento_especial or []
+            )
+        except Exception:
+            tabela_esp = []
 
         fila: list[dict[str, Any]] = []
         if indice:
@@ -225,9 +237,13 @@ def _estagio_fila_checkpoint(result: dict[str, Any], *, agente: str) -> bool:
                     from dataclasses import replace
 
                     item = replace(item, status=StatusNf.PRONTO_UI)
+                item = completar_data_vencimento(item, tabela_especial=tabela_esp)
                 fila.append(item.to_dict())
         if not fila and ck is not None:
-            fila = [i.to_dict() for i in ck.fila_ui()]
+            fila = [
+                completar_data_vencimento(i, tabela_especial=tabela_esp).to_dict()
+                for i in ck.fila_ui()
+            ]
         if not fila and not indice and ck is None:
             registrar_passo(
                 result,

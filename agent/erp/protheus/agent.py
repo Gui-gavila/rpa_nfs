@@ -39,7 +39,7 @@ BTN_ENTRAR = (718, 627)         # "Entrar" na tela de seleção de sessão
 BTN_FECHAR_AVISO = (953, 155)   # "x" do modal "Ambiente de Homologação"
 
 SETTLE_S = 2.0    # estabilização após uma transição de tela
-ERP_LOAD_S = 12.0  # carga do ERP após "Entrar" (não há sinal de rota confiável)
+AGUARDAR_TELA_S = 10.0  # teto para a próxima tela aparecer (home, session-settings)
 KEY_DELAY_MS = 50  # o TWebEngine perde teclas se a digitação for instantânea
 
 # Login PO UI (iframe app-root …/login)
@@ -350,7 +350,7 @@ class ProtheusAgent(ErpAgent):
         # Espera home real (menu lateral). Session-settings pode ficar em «Carregando…».
         import time
 
-        deadline = time.time() + max(ERP_LOAD_S, 15.0)
+        deadline = time.time() + AGUARDAR_TELA_S
         ja_na_home = False
         while time.time() < deadline:
             ja_na_home = (self._contar_dom("text=Trocar módulo") or 0) > 0 or (
@@ -360,7 +360,6 @@ class ProtheusAgent(ErpAgent):
                 break
             self.surface.sleep(0.5)
         if not ja_na_home:
-            self.surface.sleep(ERP_LOAD_S)
             self.surface.click(*self.btn_fechar_aviso)
             self.surface.sleep(SETTLE_S * 2)
             ja_na_home = (self._contar_dom("text=Trocar módulo") or 0) > 0 or (
@@ -410,7 +409,7 @@ class ProtheusAgent(ErpAgent):
                 break
         import time
 
-        deadline = time.time() + max(self.nav_timeout_s / 2.0, 15.0)
+        deadline = time.time() + AGUARDAR_TELA_S
         while time.time() < deadline:
             rota = getattr(self.surface, "rota", "") or ""
             if "/session-settings" in rota or (self._contar_dom(SEL_ENTRAR) or 0) > 0:

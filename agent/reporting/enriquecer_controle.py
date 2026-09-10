@@ -49,6 +49,7 @@ COLUNAS_AVALIACAO: tuple[str, ...] = (
     "ISSQN_RETIDO",
     "NATUREZA_DESPESA",
     "NATUREZA_RENDIMENTO",
+    "VENCIMENTO",
     "COD_RETENCAO_IRRF",
     "COD_RETENCAO_PCC",
     "STATUS",
@@ -120,6 +121,7 @@ def mapear_linha_avaliacao(
     - ``STATUS_LYNN``: status textual do agente Lynn.
     - ``STATUS_CLASSIFICACAO_PROTHEUS``: preenchido após UI/Protheus OK.
     - ``PDF_RECUPERADO`` / ``LYNN_PROCESSADO``: flags Sim/Não de gate.
+    - ``VENCIMENTO``: data RN-08 já calculada (ISO); não recalcular aqui.
     - ``TIMESTAMP ENTRADA`` / ``TIMESTAMP SAIDA``: horários de negócio
       (PDF recuperado / classificada no Protheus); não derivar de mtime.
     """
@@ -237,6 +239,7 @@ def mapear_linha_avaliacao(
             _dig(clf, "NATUREZA_RENDIMENTO") if clf else None,
             ops.get("NATUREZA_RENDIMENTO"),
         ),
+        "VENCIMENTO": _primeiro(ops.get("VENCIMENTO"), ops.get("DATA_VENCIMENTO")),
         "COD_RETENCAO_IRRF": _primeiro(
             _dig(clf, "COD_RETENCAO_IRRF") if clf else None,
             ops.get("COD_RETENCAO_IRRF"),

@@ -67,6 +67,7 @@ def item_para_linha_avaliacao(item: ItemCheckpoint) -> dict[str, str]:
     ops["NOME_FILIAL"] = item.filial_nome or ""
     ops["COD_LOJA"] = item.codigo_loja or ""
     ops["COD_ENTIDADE"] = item.ac9_codent or item.cod_objeto or ""
+    ops["VENCIMENTO"] = item.data_vencimento or ""
     extracao = classificacao = None
     if item.pdf_path:
         pdf = Path(item.pdf_path)

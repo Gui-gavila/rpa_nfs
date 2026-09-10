@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -177,10 +178,32 @@ def item_de_linha_controle(linha: Mapping[str, Any]) -> Any:
         codigo_servico=_s(linha.get("COD_TRIBUTACAO")) or None,
         natureza_despesa=_s(linha.get("NATUREZA_DESPESA")) or None,
         natureza_rendimento=_s(linha.get("NATUREZA_RENDIMENTO")) or None,
-        data_vencimento=None,
+        data_vencimento=_s(linha.get("VENCIMENTO")) or None,
         issqn=_s(linha.get("ISSQN")) or "0",
         irrf=_s(linha.get("IRRF")) or "0",
         pis=_s(linha.get("PIS")) or "0",
         cofins=_s(linha.get("COFINS")) or "0",
         csll=_s(linha.get("CSLL")) or "0",
     )
+
+
+def completar_data_vencimento(
+    item: Any,
+    *,
+    referencia: date | None = None,
+    tabela_especial: Iterable[Mapping[str, Any]] | None = None,
+) -> Any:
+    """Preenche RN-08 se o item da fila UI não tiver vencimento (planilha/checkpoint)."""
+    from dataclasses import replace
+
+    from agent.domain.classificacao_nf.vencimento import calcular_vencimento
+
+    if _s(getattr(item, "data_vencimento", None)):
+        return item
+    venc = calcular_vencimento(
+        nivel=int(getattr(item, "nivel", 0) or 0),
+        codigo_fornecedor=str(getattr(item, "codigo_fornecedor", "") or ""),
+        referencia=referencia or date.today(),
+        tabela_especial=tabela_especial,
+    )
+    return replace(item, data_vencimento=venc.isoformat())
