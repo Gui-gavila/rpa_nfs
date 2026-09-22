@@ -6,6 +6,7 @@ from datetime import date
 
 from agent.domain.classificacao_nf.deparas import (
     TabelasDepara,
+    normalizar_cod_tributacao,
     resolver_codigo_servico,
     resolver_natureza_despesa,
     resolver_natureza_rendimento,
@@ -72,7 +73,22 @@ def _preparar_via_lynn(
         # Status inesperado: não forçar; deixa fallback depara.
         return None
 
-    codigo = (clf.cod_tributacao or pdf.codigo_servico or "").strip() or None
+    codigo_bruto = (clf.cod_tributacao or pdf.codigo_servico or "").strip()
+    codigo = normalizar_cod_tributacao(codigo_bruto, tabelas.natureza_rendimento)
+    if not codigo:
+        return PreparacaoClassificacao(
+            ok=False,
+            status=StatusNf.NAO_CLASSIFICADO,
+            motivo=MOTIVOS.DEPARA_RENDIMENTO_AUSENTE,
+            codigo_servico=codigo_bruto or None,
+            natureza_despesa=clf.natureza_despesa,
+            natureza_rendimento=clf.natureza_rendimento,
+            codigo_retencao=_codigo_retencao_lynn(
+                clf.cod_retencao_irrf, clf.cod_retencao_pcc
+            ),
+            nota_erp=erp,
+            nota_pdf=pdf,
+        )
     vencimento = calcular_vencimento(
         nivel=erp.nivel,
         codigo_fornecedor=erp.codigo_fornecedor,

@@ -1,4 +1,4 @@
-"""Agrupamento do bloco UI (um login Protheus por filial)."""
+"""Agrupamento auxiliar por filial. A sessão UI entra só na holding 0101."""
 
 from __future__ import annotations
 

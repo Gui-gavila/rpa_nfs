@@ -5,6 +5,7 @@ from __future__ import annotations
 from agent.domain.classificacao_nf.deparas import (
     TabelasDepara,
     carregar_tabela_csv,
+    normalizar_cod_tributacao,
     resolver_codigo_servico,
     resolver_natureza_despesa,
     resolver_natureza_rendimento,
@@ -60,6 +61,7 @@ __all__ = [
     "carregar_tabelas_depara_de_config",
     "layout_permitido",
     "motivo_recusa_layout_ou_tipo",
+    "normalizar_cod_tributacao",
     "montar_ac9_codent",
     "montar_ac9_codent_de_nota",
     "nome_arquivo_pdf_fsb",

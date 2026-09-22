@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import csv
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
+
+# Item da Lei 13.701/03: "17.02" ou subitem "17.02.01" (o subitem é descartado).
+_ITEM_LEI = re.compile(r"^(\d{1,2}\.\d{2})(?:\.\d{2})?$")
 
 
 def _norm(valor: Any) -> str:
@@ -145,4 +149,49 @@ def resolver_natureza_rendimento(
         )
         if natureza:
             return natureza
+    return None
+
+
+def _item_lei(valor: str) -> str | None:
+    texto = _norm(valor)
+    achado = _ITEM_LEI.fullmatch(texto)
+    if not achado:
+        return None
+    return achado.group(1)
+
+
+def normalizar_cod_tributacao(
+    codigo: str,
+    tabela_rendimento: Iterable[Mapping[str, Any]] = (),
+) -> str | None:
+    """Reduz COD_TRIBUTACAO ao item da Lei 13.701/03 (``xx.xx``).
+
+    Item já no formato da lei (``17.02`` ou ``17.02.01``) não consulta de/para.
+    Código de serviço numérico consulta a coluna item da Natureza de Rendimento.
+    Sem linha correspondente, devolve None.
+    """
+    bruto = _norm(codigo)
+    if not bruto:
+        return None
+    item = _item_lei(bruto)
+    if item:
+        return item
+    if not bruto.isdigit():
+        return None
+    for linha in tabela_rendimento:
+        codigo_linha = _celula(
+            linha,
+            "codigo",
+            "codigo_servico",
+            "Codigo",
+            "Codigo de Servico",
+            "Código de Serviço",
+        )
+        if codigo_linha != bruto:
+            continue
+        item_linha = _item_lei(
+            _celula(linha, "item", "Item", "item_lei", "Item da Lei", "Item Lei")
+        )
+        if item_linha and item_linha != bruto:
+            return item_linha
     return None

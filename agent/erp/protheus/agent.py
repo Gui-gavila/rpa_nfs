@@ -429,10 +429,9 @@ class ProtheusAgent(ErpAgent):
         """Entra no ERP e classifica a fila_ui via MATA103; atualiza checkpoint."""
         from agent import config
         from agent.domain.classificacao_nf.status import StatusNf
-        from agent.erp.protheus.mata103 import Mata103Ui
+        from agent.erp.protheus.mata103 import FILIAL_HOLDING, Mata103Ui
         from agent.integrations.protheus_api import criar_protheus_api_client
         from agent.jobs.classificar_nf.checkpoint import Checkpoint, ItemCheckpoint
-        from agent.jobs.classificar_nf.lote import agrupar_por_filial
 
         resultado: dict[str, Any] = {
             "ok": False,
@@ -452,15 +451,8 @@ class ProtheusAgent(ErpAgent):
                 elif isinstance(raw, dict):
                     itens.append(ItemCheckpoint.from_dict(raw))
 
-            grupos = agrupar_por_filial(
-                [i for i in itens if i.status == StatusNf.PRONTO_UI]
-            )
-            filial_sessao = ""
-            if grupos:
-                filial_sessao = grupos[0][0].filial_codigo
-            elif itens:
-                filial_sessao = itens[0].filial_codigo
-            ok, erro = self._entrar_erp_principal(filial_codigo=filial_sessao)
+            prontos = [i for i in itens if i.status == StatusNf.PRONTO_UI]
+            ok, erro = self._entrar_erp_principal(filial_codigo=FILIAL_HOLDING)
             if not ok:
                 resultado["erro"] = erro
                 resultado["screenshots"] = self._screenshots
@@ -479,157 +471,147 @@ class ProtheusAgent(ErpAgent):
 
             classificadas = 0
             falhas = 0
-            for gi, grupo in enumerate(grupos):
-                filial_grupo = (grupo[0].filial_codigo or "").strip()
-                if gi > 0:
-                    ui.preparar_troca_filial(filial_grupo)
-                    ok_t, err_t = self._trocar_filial_erp(filial_grupo)
-                    if not ok_t:
-                        logger.error("[ProtheusAgent] %s", err_t)
-                        # Não fechar no data-plane: leftover PRONTO_UI retenta no próximo worker.
-                        falhas += len(grupo)
-                        continue
-                for item in grupo:
-                    logger.info(
-                        "[ProtheusAgent] MATA103 item %s status=%s",
-                        item.chave,
-                        item.status,
-                    )
-                    res = ui.classificar_item(item)
-                    if res.ok:
-                        # Commit do F1_STATUS pode atrasar alguns segundos após o Salvar UI.
-                        confirmada = False
-                        status_api = "-"
-                        consultar = getattr(api, "consultar_f1_status", None)
-                        for tentativa in range(5):
-                            confirmada = api.confirmar_classificada(
-                                filial_codigo=item.filial_codigo,
-                                numero_nf=item.numero_nf,
-                                codigo_fornecedor=item.codigo_fornecedor,
-                            )
-                            if consultar:
-                                try:
-                                    lido = consultar(
-                                        filial_codigo=item.filial_codigo,
-                                        numero_nf=item.numero_nf,
-                                        codigo_fornecedor=item.codigo_fornecedor,
-                                    )
-                                    status_api = (
-                                        "-" if lido is None else (lido or "(vazio)")
-                                    )
-                                except Exception:
-                                    status_api = "?"
-                            logger.info(
-                                "[ProtheusAgent] confirmacao_api:chave=%s|"
-                                "F1_STATUS=%s|ok=%s|tentativa=%s",
-                                item.chave,
-                                status_api,
-                                confirmada,
-                                tentativa + 1,
-                            )
-                            if confirmada or ui.simulado:
-                                break
-                            logger.info(
-                                "[ProtheusAgent] confirmação API pendente %s tentativa=%s",
-                                item.chave,
-                                tentativa + 1,
-                            )
-                            sleep = getattr(self.surface, "sleep", None)
-                            if sleep:
-                                sleep(1.2)
-                            else:
-                                import time
-
-                                time.sleep(1.2)
+            for item in prontos:
+                logger.info(
+                    "[ProtheusAgent] MATA103 item %s status=%s",
+                    item.chave,
+                    item.status,
+                )
+                res = ui.classificar_item(item)
+                if res.ok:
+                    # Commit do F1_STATUS pode atrasar alguns segundos após o Salvar UI.
+                    confirmada = False
+                    status_api = "-"
+                    consultar = getattr(api, "consultar_f1_status", None)
+                    for tentativa in range(5):
+                        confirmada = api.confirmar_classificada(
+                            filial_codigo=item.filial_codigo,
+                            numero_nf=item.numero_nf,
+                            codigo_fornecedor=item.codigo_fornecedor,
+                        )
+                        if consultar:
+                            try:
+                                lido = consultar(
+                                    filial_codigo=item.filial_codigo,
+                                    numero_nf=item.numero_nf,
+                                    codigo_fornecedor=item.codigo_fornecedor,
+                                )
+                                status_api = (
+                                    "-" if lido is None else (lido or "(vazio)")
+                                )
+                            except Exception:
+                                status_api = "?"
+                        logger.info(
+                            "[ProtheusAgent] confirmacao_api:chave=%s|"
+                            "F1_STATUS=%s|ok=%s|tentativa=%s",
+                            item.chave,
+                            status_api,
+                            confirmada,
+                            tentativa + 1,
+                        )
                         if confirmada or ui.simulado:
-                            item.status = StatusNf.CLASSIFICADO
-                            item.motivo = None
-                            classificadas += 1
-                            try:
-                                from agent.jobs.classificar_nf.caminhos import (
-                                    mover_para_classificadas_protheus,
-                                )
-
-                                novo = mover_para_classificadas_protheus(
-                                    item.pdf_path
-                                )
-                                if novo is not None:
-                                    item.pdf_path = str(novo)
-                                    logger.info(
-                                        "[ProtheusAgent] movido_03:chave=%s|pdf=%s",
-                                        item.chave,
-                                        novo,
-                                    )
-                            except Exception as e:
-                                logger.warning(
-                                    "[ProtheusAgent] move 02→03 falhou chave=%s: %s",
-                                    item.chave,
-                                    e,
-                                )
-                            try:
-                                from agent.jobs.classificar_nf.caminhos import (
-                                    caminhos_de_config,
-                                )
-                                from agent.reporting.controle_vivo import (
-                                    FLAG_SIM,
-                                    carregar_indice,
-                                    salvar_indice,
-                                    upsert_indice,
-                                )
-                                from agent.reporting.enriquecer_controle import (
-                                    agora_iso_local,
-                                )
-
-                                controle = (
-                                    config.CLASSIFICAR_NF_CONTROLE_XLSX or ""
-                                ).strip() or caminhos_de_config().get(
-                                    "controle_xlsx", ""
-                                )
-                                if controle:
-                                    indice = carregar_indice(controle)
-                                    upsert_indice(
-                                        indice,
-                                        {
-                                            "COD_FILIAL": item.filial_codigo,
-                                            "NUMERO_NF": item.numero_nf,
-                                            "COD_FORNECEDOR": item.codigo_fornecedor,
-                                            "STATUS": StatusNf.CLASSIFICADO,
-                                            "MOTIVO": "",
-                                            "STATUS_CLASSIFICACAO_PROTHEUS": (
-                                                status_api
-                                                if status_api
-                                                not in ("-", "?", "(vazio)", "")
-                                                else FLAG_SIM
-                                            ),
-                                            "TIMESTAMP SAIDA": agora_iso_local(),
-                                        },
-                                        forcar=(
-                                            "STATUS",
-                                            "MOTIVO",
-                                            "STATUS_CLASSIFICACAO_PROTHEUS",
-                                            "TIMESTAMP SAIDA",
-                                        ),
-                                    )
-                                    salvar_indice(controle, indice)
-                            except Exception as e:
-                                logger.warning(
-                                    "[ProtheusAgent] planilha Protheus falhou chave=%s: %s",
-                                    item.chave,
-                                    e,
-                                )
+                            break
+                        logger.info(
+                            "[ProtheusAgent] confirmação API pendente %s tentativa=%s",
+                            item.chave,
+                            tentativa + 1,
+                        )
+                        sleep = getattr(self.surface, "sleep", None)
+                        if sleep:
+                            sleep(1.2)
                         else:
-                            item.status = StatusNf.NAO_CLASSIFICADO
-                            item.motivo = (
-                                "Interno - Status Classificada não confirmado na API"
+                            import time
+
+                            time.sleep(1.2)
+                    if confirmada or ui.simulado:
+                        item.status = StatusNf.CLASSIFICADO
+                        item.motivo = None
+                        classificadas += 1
+                        try:
+                            from agent.jobs.classificar_nf.caminhos import (
+                                mover_para_classificadas_protheus,
                             )
-                            falhas += 1
+
+                            novo = mover_para_classificadas_protheus(
+                                item.pdf_path
+                            )
+                            if novo is not None:
+                                item.pdf_path = str(novo)
+                                logger.info(
+                                    "[ProtheusAgent] movido_03:chave=%s|pdf=%s",
+                                    item.chave,
+                                    novo,
+                                )
+                        except Exception as e:
+                            logger.warning(
+                                "[ProtheusAgent] move 02→03 falhou chave=%s: %s",
+                                item.chave,
+                                e,
+                            )
+                        try:
+                            from agent.jobs.classificar_nf.caminhos import (
+                                caminhos_de_config,
+                            )
+                            from agent.reporting.controle_vivo import (
+                                FLAG_SIM,
+                                carregar_indice,
+                                salvar_indice,
+                                upsert_indice,
+                            )
+                            from agent.reporting.enriquecer_controle import (
+                                agora_iso_local,
+                            )
+
+                            controle = (
+                                config.CLASSIFICAR_NF_CONTROLE_XLSX or ""
+                            ).strip() or caminhos_de_config().get(
+                                "controle_xlsx", ""
+                            )
+                            if controle:
+                                indice = carregar_indice(controle)
+                                upsert_indice(
+                                    indice,
+                                    {
+                                        "COD_FILIAL": item.filial_codigo,
+                                        "NUMERO_NF": item.numero_nf,
+                                        "COD_FORNECEDOR": item.codigo_fornecedor,
+                                        "STATUS": StatusNf.CLASSIFICADO,
+                                        "MOTIVO": "",
+                                        "STATUS_CLASSIFICACAO_PROTHEUS": (
+                                            status_api
+                                            if status_api
+                                            not in ("-", "?", "(vazio)", "")
+                                            else FLAG_SIM
+                                        ),
+                                        "TIMESTAMP SAIDA": agora_iso_local(),
+                                    },
+                                    forcar=(
+                                        "STATUS",
+                                        "MOTIVO",
+                                        "STATUS_CLASSIFICACAO_PROTHEUS",
+                                        "TIMESTAMP SAIDA",
+                                    ),
+                                )
+                                salvar_indice(controle, indice)
+                        except Exception as e:
+                            logger.warning(
+                                "[ProtheusAgent] planilha Protheus falhou chave=%s: %s",
+                                item.chave,
+                                e,
+                            )
                     else:
-                        item.status = res.status
-                        item.motivo = res.motivo
+                        item.status = StatusNf.NAO_CLASSIFICADO
+                        item.motivo = (
+                            "Interno - Status Classificada não confirmado na API"
+                        )
                         falhas += 1
-                    if ck is not None:
-                        ck.upsert(item)
-                        ck.salvar()
+                else:
+                    item.status = res.status
+                    item.motivo = res.motivo
+                    falhas += 1
+                if ck is not None:
+                    ck.upsert(item)
+                    ck.salvar()
 
             resultado["ok"] = True
             resultado["classificadas"] = classificadas

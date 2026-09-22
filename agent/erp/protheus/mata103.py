@@ -26,6 +26,7 @@ COD_RETENCAO_PCC = "5952"
 SETTLE_S = 1.2
 AGUARDAR_TELA_S = 10.0  # teto para rotina/filtro/formulário aparecerem
 ROTINA = "MATA103"
+FILIAL_HOLDING = "0101"
 
 # `campo-filtro-numero.png` ancora o TÍTULO do F12 («através de perguntas»),
 # não o rótulo Número. Offsets até Número e Fornecedor (lab 1280×720).
@@ -62,6 +63,7 @@ class Mata103Ui:
         self.settle_s = settle_s
         self.key_delay_ms = key_delay_ms
         self._aberta = False
+        self._falha_filtro: str | None = None
         self.acoes: list[str] = []
 
     @property
@@ -463,6 +465,24 @@ class Mata103Ui:
             log_tag="click_dom_remover_filtros",
         )
 
+    def _aguardar_browse_sem_filtro(self) -> None:
+        """Depois de Remover, espera o browse largar o filtro antes do próximo F12."""
+        if self.simulado or self.surface is None:
+            return
+        import time
+
+        sleep = getattr(self.surface, "sleep", None)
+        deadline = time.time() + AGUARDAR_TELA_S
+        while time.time() < deadline:
+            if self._contar_dom("text=/filtros aplicados/i") <= 0:
+                if sleep:
+                    sleep(max(self.settle_s, 0.8))
+                self._log("pesquisar:browse_estavel")
+                return
+            if sleep:
+                sleep(0.4)
+        self._log("pesquisar:browse_timeout_filtros")
+
     def _focar_campo_filtro_numero(self) -> bool:
         """Garante foco no 1º campo do filtro (canvas exige clique)."""
         pos = self._locate("mata103/campo-filtro-numero.png", confidence=0.9)
@@ -506,7 +526,9 @@ class Mata103Ui:
         self._log("click_filtro_confirmar:enter")
         return False
 
-    def _aguardar_filtro_perguntas(self, *, timeout_s: float = AGUARDAR_TELA_S) -> bool:
+    def _aguardar_filtro_perguntas(self, *, timeout_s: float | None = None) -> bool:
+        if timeout_s is None:
+            timeout_s = AGUARDAR_TELA_S
         if self.simulado or self.surface is None:
             return True
         sleep = getattr(self.surface, "sleep", None)
@@ -700,6 +722,7 @@ class Mata103Ui:
         Número e Fornecedor por clique. Depois do Fornecedor o SX1 foca
         Filial sozinho — Tab/clique extra tira o foco e deixa residual SX1.
         """
+        self._falha_filtro = None
         self._log(
             f"pesquisar:filial={filial_codigo}|nf={numero_nf}|forn={codigo_fornecedor}"
         )
@@ -709,7 +732,8 @@ class Mata103Ui:
         # Reaproveita «Filtro através de perguntas» se já estiver aberto (auto ao abrir).
         # Não cancelar: um F12 posterior nesta build abre Parametros, não o filtro.
         if not self._tem_filtro_perguntas():
-            self._remover_filtros_browse()
+            if self._remover_filtros_browse():
+                self._aguardar_browse_sem_filtro()
             for tentativa in range(2):
                 if self._tem_dialogo_parametros():
                     self._confirmar_parametros()
@@ -727,9 +751,10 @@ class Mata103Ui:
                 self._log(f"pesquisar:filtro_retry:{tentativa + 1}")
             else:
                 self._log("pesquisar:filtro_nao_abriu")
-                return False if not self.simulado else (
-                    True if encontrada is None else bool(encontrada)
-                )
+                if self.simulado:
+                    return True if encontrada is None else bool(encontrada)
+                self._falha_filtro = MOTIVOS.FILTRO_MATA103_NAO_CARREGADO
+                return False
         # Normaliza DOC a 9 dígitos quando numérico (padrão SF1/F1_DOC).
         doc = (numero_nf or "").strip()
         dig = "".join(ch for ch in doc if ch.isdigit())
@@ -914,6 +939,32 @@ class Mata103Ui:
         self._evidencia("mata103_classificar_falhou")
         return False
 
+    def preencher_cod_serv_iss(self, codigo: str) -> bool:
+        """Preenche Cod.Serv.ISS com o item já normalizado (``xx.xx``).
+
+        O template do campo é o caminho estável. Sem o PNG, 159 setas à direita
+        a partir da área de navegação — só nesse caso.
+        """
+        valor = (codigo or "").strip()
+        if not valor:
+            self._log("cod_serv_iss:ausente")
+            return False
+        self._log(f"cod_serv_iss:{valor}")
+        tem_template = self._template("campo-cod-serv-iss.png").is_file()
+        if self.simulado or tem_template:
+            if self._click_template(
+                "campo-cod-serv-iss.png", timeout_s=4.0, offset_x=35
+            ):
+                self._type_campo(valor)
+                self._press("tab")
+                return True
+        self._log("cod_serv_iss:setas")
+        for _ in range(159):
+            self._press("ArrowRight")
+        self._type_campo(valor)
+        self._press("tab")
+        return True
+
     def preencher_duplicatas(self, *, natureza: str, data_vencimento: str) -> bool:
         self._log(f"duplicatas:natureza={natureza}|venc={data_vencimento}")
         if not self._click_template(
@@ -1075,6 +1126,33 @@ class Mata103Ui:
                 )
         return True
 
+    def _tem_tela_contabilizacao(self) -> bool:
+        if self._locate("mata103/tela-contabilizacao.png", confidence=0.85):
+            return True
+        return any(
+            self._contar_dom(sel) > 0
+            for sel in (
+                "text=/Débitos e Créditos/i",
+                "text=/Debitos e Creditos/i",
+                "text=/Contabilização/i",
+                "text=/Contabilizacao/i",
+            )
+        )
+
+    def _aguardar_tela_contabilizacao(self, *, presente: bool) -> bool:
+        if self.simulado or self.surface is None:
+            return True
+        import time
+
+        sleep = getattr(self.surface, "sleep", None)
+        deadline = time.time() + AGUARDAR_TELA_S
+        while time.time() < deadline:
+            if self._tem_tela_contabilizacao() == presente:
+                return True
+            if sleep:
+                sleep(0.2)
+        return self._tem_tela_contabilizacao() == presente
+
     def salvar_classificacao(self) -> bool:
         self._log("salvar")
         if self.simulado or self.surface is None:
@@ -1106,6 +1184,14 @@ class Mata103Ui:
             self._dismiss_help_dialogs()
             return False
 
+        if self._template("tela-contabilizacao.png").is_file():
+            if not self._aguardar_tela_contabilizacao(presente=True):
+                self._log("salvar:contabilizacao_nao_abriu")
+                self._evidencia("mata103_salvar_sem_contabilizacao")
+                return False
+        else:
+            self._log("salvar:contabilizacao_sem_template")
+
         # Segunda gravação (contabilização débitos/créditos) — sempre tentar.
         self._log("salvar:2")
         if not self._click_template("btn-salvar.png", timeout_s=4.0):
@@ -1118,6 +1204,12 @@ class Mata103Ui:
             sleep(max(self.settle_s * 3.0, 3.5))
         self._evidencia("mata103_salvar_apos2")
         self._confirmar_dialogos_pos_salvar()
+        if self._template("tela-contabilizacao.png").is_file():
+            if not self._aguardar_tela_contabilizacao(presente=False):
+                self._log("salvar:contabilizacao_ainda_aberta")
+                self._evidencia("mata103_salvar_contabilizacao_aberta")
+                return False
+            self._log("salvar:contabilizacao_fechou")
 
         # Aguarda o diálogo CLASSIFICAR fechar.
         if sleep:
@@ -1149,7 +1241,7 @@ class Mata103Ui:
                 MOTIVOS.DEPARA_NATUREZA_AUSENTE,
                 "campos UI incompletos",
             )
-        if not self.abrir_rotina(filial_codigo=item.filial_codigo):
+        if not self.abrir_rotina(filial_codigo=FILIAL_HOLDING):
             return ResultadoUiNf(
                 False, StatusNf.NAO_CLASSIFICADO, "Interno - Falha ao abrir MATA103"
             )
@@ -1159,6 +1251,8 @@ class Mata103Ui:
             codigo_fornecedor=item.codigo_fornecedor,
             encontrada=encontrada,
         ):
+            if self._falha_filtro:
+                return ResultadoUiNf(False, StatusNf.PRONTO_UI, self._falha_filtro)
             return ResultadoUiNf(
                 False,
                 StatusNf.NAO_CLASSIFICADO,
@@ -1174,6 +1268,12 @@ class Mata103Ui:
         if bloqueio:
             self._dismiss_help_dialogs()
             return ResultadoUiNf(False, StatusNf.NAO_CLASSIFICADO, bloqueio)
+        if not self.preencher_cod_serv_iss(item.codigo_servico or ""):
+            return ResultadoUiNf(
+                False,
+                StatusNf.NAO_CLASSIFICADO,
+                MOTIVOS.campo_nao_coletado("Cod.Serv.ISS"),
+            )
         if not self.preencher_duplicatas(
             natureza=item.natureza_despesa,
             data_vencimento=item.data_vencimento,

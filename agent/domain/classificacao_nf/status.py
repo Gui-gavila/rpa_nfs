@@ -20,6 +20,7 @@ class MOTIVOS:
     VALOR_DIVERGENTE = "Valor total divergente"
     TIPO_DIVERGENTE = "Tipo de nota fiscal divergente"
     NF_NAO_ENCONTRADA_ERP = "Nota fiscal não foi encontrada pelo ERP"
+    FILTRO_MATA103_NAO_CARREGADO = "Tela filtro MATA103 não foi devidamente carregada"
     DEPARA_NATUREZA_AUSENTE = "Interno - Natureza de despesa não encontrada no depara"
     DEPARA_SERVICO_AUSENTE = "Interno - Código de serviço não encontrado no depara"
     DEPARA_RENDIMENTO_AUSENTE = "Interno - Natureza de rendimento não encontrada no depara"
