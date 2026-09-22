@@ -1,0 +1,3 @@
+github_user=marciocruz-totvs
+origin=https://github.com/totvs-oes/bot-carol-tezk42-contabil.git
+branch=master
